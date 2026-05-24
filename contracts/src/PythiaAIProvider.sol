@@ -140,6 +140,17 @@ contract PythiaAIProvider is IFlapAIProvider, AccessControl {
         emit FlapAIProviderCallbackGasLimitUpdated(old, newCallbackGasLimit);
     }
 
+    function setFeeReceiver(address newReceiver) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newReceiver != address(0), "zero receiver");
+        feeReceiver = newReceiver;
+    }
+
+    function sweep() external {
+        uint256 bal = address(this).balance;
+        (bool ok,) = feeReceiver.call{value: bal}("");
+        require(ok, "sweep failed");
+    }
+
     function getTotalRequests() external view returns (uint256 total) {
         return _nextRequestId - 1;
     }

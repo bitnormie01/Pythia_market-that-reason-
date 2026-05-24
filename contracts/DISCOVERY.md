@@ -5,7 +5,7 @@
 | Chain ID | 196 | hardcoded |
 | Bridged USDT address | `0x779ded0c9e1022225f8e0630b35a9b54be713736` | OKX OnchainOS supported currencies docs |
 | USDT decimals | 6 | `cast call decimals()` on `https://rpc.xlayer.tech` |
-| USDT/OKB routable liquidity | >= $10k routable: `10,000 USDT -> 120.304085331571362265 OKB`, price impact `-0.29%`; route split across Uniswap V3, Uniswap V4, CurveNG, PotatoSwap, QuickSwap V3, Revoswap V2, OkieSwap V3 | `onchainos swap quote --from usdt --to okb --readable-amount 10000 --chain xlayer` at context slot `60837191` |
+| USDT/OKB routable liquidity | UR-compatible direct Uniswap V3 route confirmed: `10,000 USDT -> 120.313065446636224459 WOKB` via 0.30% USDT/WOKB pool `0x63d62734847e55a266fca4219a9ad0a02d5f6e02`; pool liquidity `263398676013757805`; OnchainOS reports `$1.91m` pool liquidity | `cast call` to X Layer QuoterV2 `0xd1b797d92d87b688193a2b976efc8d577d204343` and pool contract; Uniswap X Layer V3 deployments docs |
 | V4 PoolManager | `0x360e68faccca8ca495c1b759fd9eee466db9fb32` | docs/superpowers/specs |
 | V4 Quoter | `0x8928074ca1b241d8ec02815881c1af11e8bc5219` | docs/superpowers/specs |
 | Universal Router 2.1.1 | `0x8b844f885672f333bc0042cb669255f93a4c1e6b` | docs/superpowers/specs |
@@ -17,5 +17,7 @@
 ## Notes
 
 - `forge install` / direct Git clones stalled in this environment, so Solidity dependencies are installed through npm instead.
-- `@uniswap/permit2` is not published in the npm registry. It is tracked as a GitHub tarball dependency in `package.json` / `package-lock.json` and remapped from `node_modules/@uniswap/permit2`.
-- USDT -> OKB routing was verified through OKX OnchainOS DEX quote. This confirms practical DEX routability and >= $10k depth, but does not directly prove a standalone Universal Router calldata path.
+- `@uniswap/permit2` is not published in the npm registry. It is tracked as a GitHub tarball dependency pinned to commit `cc56ad0f3439c502c246fc5cfcc3db92bb8b7219` in `package.json` / `package-lock.json` and remapped from `node_modules/@uniswap/permit2`.
+- USDT -> OKB practical routing was also verified through OKX OnchainOS DEX quote: `10,000 USDT -> 120.304085331571362265 OKB`, price impact `-0.29%`, route split across Uniswap V3, Uniswap V4, CurveNG, PotatoSwap, QuickSwap V3, Revoswap V2, and OkieSwap V3 at context slot `60837191`.
+- Universal Router path for the frontend "Get OKB -> Resolve" button should use the direct Uniswap V3 0.30% USDT/WOKB pool, not the broader OnchainOS aggregate route. The V4 vanilla USDT/WOKB pool keys checked at fee/tick spacing `(100,1)`, `(500,10)`, `(3000,60)`, and `(10000,200)` reverted with `PoolNotInitialized()`.
+- Known v1 limitation: `PythiaAIProvider.getRequestsByConsumer` is an O(n) explorer view with a temporary array sized to total request count. This is acceptable for demo-scale traffic and should be indexed or paginated from a per-consumer request list before production-scale traffic.

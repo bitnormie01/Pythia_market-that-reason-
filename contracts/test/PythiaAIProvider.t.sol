@@ -31,6 +31,24 @@ contract MockConsumer {
     }
 }
 
+contract MockRefundReverter {
+    address public immutable provider;
+
+    constructor(address provider_) {
+        provider = provider_;
+    }
+
+    function fulfillReasoning(uint256, uint8) external {}
+
+    function onFlapAIRequestRefunded(uint256) external payable {
+        revert("refund rejected");
+    }
+
+    function reason() external payable returns (uint256) {
+        return IFlapAIProvider(provider).reason{value: msg.value}(1, "prompt", 3);
+    }
+}
+
 contract PythiaAIProviderTest is Test {
     PythiaAIProvider provider;
     address admin = address(0xA1);
@@ -224,6 +242,50 @@ contract PythiaAIProviderTest is Test {
         vm.prank(admin);
         provider.setMaxPromptLength(10_000);
         assertEq(provider.maxPromptLength(), 10_000);
+    }
+
+    function test_setFeeReceiver_admin_only() public {
+        address newReceiver = address(0xFEE2);
+
+        vm.expectRevert();
+        provider.setFeeReceiver(newReceiver);
+
+        vm.prank(admin);
+        provider.setFeeReceiver(newReceiver);
+        assertEq(provider.feeReceiver(), newReceiver);
+    }
+
+    function test_setFeeReceiver_reverts_on_zero_receiver() public {
+        vm.prank(admin);
+        vm.expectRevert("zero receiver");
+        provider.setFeeReceiver(address(0));
+    }
+
+    function test_sweep_can_be_called_by_anyone_and_moves_balance_to_feeReceiver() public {
+        vm.deal(address(provider), 0.42 ether);
+
+        address caller = address(0xBEEF);
+        uint256 receiverBefore = feeReceiver.balance;
+        vm.prank(caller);
+        provider.sweep();
+
+        assertEq(address(provider).balance, 0);
+        assertEq(feeReceiver.balance, receiverBefore + 0.42 ether);
+    }
+
+    function test_sweep_recovers_failed_refund_delivery() public {
+        MockRefundReverter c = new MockRefundReverter(address(provider));
+        vm.deal(address(this), 1 ether);
+        uint256 id = c.reason{value: 0.01 ether}();
+
+        vm.prank(fulfiller);
+        provider.refundRequest(id);
+        assertEq(address(provider).balance, 0.01 ether);
+
+        uint256 receiverBefore = feeReceiver.balance;
+        provider.sweep();
+        assertEq(address(provider).balance, 0);
+        assertEq(feeReceiver.balance, receiverBefore + 0.01 ether);
     }
 
     function test_getTotalRequests_tracks_count() public {
