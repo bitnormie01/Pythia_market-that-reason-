@@ -1785,7 +1785,7 @@ function mintFor(uint256 marketId, address to, uint256 amount) external {
 }
 
 function _mint(uint256 marketId, address to, uint256 amount) internal {
-    if (effectiveStatus(marketId) != MarketStatus.TRADING) revert MarketNotTrading();
+    if (effectiveStatus(marketId) != ExtendedStatus.TRADING) revert MarketNotTrading();
     require(usdt.transferFrom(msg.sender, address(this), amount), "usdt transfer failed");
     MarketState storage m = markets[marketId];
     OutcomeToken(m.yesToken).mint(to, amount);
@@ -1829,22 +1829,20 @@ function redeem(uint256 marketId, uint256 amount) external {
         uint256 bondAmt = bond[marketId];
         bond[marketId] = 0;
         if (m.winningChoice == CHOICE_INVALID) {
-            // Burn to address(0)
-            require(usdt.transfer(address(0), bondAmt), "bond burn failed");
+            // Send to burn sink; real ERC20s commonly reject address(0) transfers.
+            require(usdt.transfer(BOND_BURN_SINK, bondAmt), "bond burn failed");
         } else {
             require(usdt.transfer(m.creator, bondAmt), "bond return failed");
         }
     }
 }
 
-function effectiveStatus(uint256 marketId) public view returns (MarketStatus) {
+function effectiveStatus(uint256 marketId) public view returns (ExtendedStatus) {
     MarketState storage m = markets[marketId];
-    if (m.status == MarketStatus.TRADING && block.timestamp > m.expiry + RESOLUTION_GRACE) {
-        // EXPIRED is implicit — return TRADING so mint/swap check still works,
-        // callers that need to know about expiry use effectiveStatusExtended below.
-        return MarketStatus.TRADING; // simplified for now; extended status in Task 4.6
-    }
-    return m.status;
+    if (m.status == MarketStatus.RESOLVED) return ExtendedStatus.RESOLVED;
+    if (m.status == MarketStatus.RESOLVING) return ExtendedStatus.RESOLVING;
+    if (block.timestamp > m.expiry + RESOLUTION_GRACE) return ExtendedStatus.EXPIRED;
+    return ExtendedStatus.TRADING;
 }
 
 event Minted(uint256 indexed marketId, address indexed to, uint256 amount);
@@ -1852,7 +1850,7 @@ event Burned(uint256 indexed marketId, address indexed from, uint256 amount);
 event Redeemed(uint256 indexed marketId, address indexed user, uint256 amount, uint8 winningChoice);
 ```
 
-Note: `effectiveStatus` needs refinement for the EXPIRED-vs-TRADING distinction. Pull this into Task 4.6 where the actual gating is exercised.
+Note: `effectiveStatus` now returns the four-value `ExtendedStatus` early so mint and frontend reads can distinguish EXPIRED from stored TRADING before Task 4.6 gating lands.
 
 - [ ] **Step 4: Run; expect pass**
 
@@ -1865,6 +1863,40 @@ forge test --match-path test/PythiaHook.t.sol -vv
 ```bash
 git add contracts/src/PythiaHook.sol contracts/test/PythiaHook.t.sol
 git commit -m "feat(hook): mint / mintFor / burn / redeem with collateral invariant"
+```
+
+### Task 4.5b: Hook — creator seed withdrawal
+
+- [ ] **Step 1: Implement hook-owned seed withdrawal**
+
+V4 1.0.2 records the liquidity position owner as `msg.sender` during `modifyLiquidity`. Because `createMarket` seeds liquidity through the hook's `unlockCallback`, the initial seed position is hook-owned. Add:
+
+```solidity
+struct WithdrawSeedData {
+    uint256 marketId;
+    address to;
+    uint128 liquidityToRemove;
+}
+
+function creatorWithdrawSeed(uint256 marketId, uint128 liquidityToRemove) external;
+```
+
+Encode unlock data with an opcode byte so `unlockCallback` can branch between seed-add and seed-withdraw. For seed-withdraw, remove hook-owned liquidity, `take` returned YES/NO to the hook, burn the matched pair, and transfer the released USDT collateral to the creator.
+
+Gate `creatorWithdrawSeed` to `effectiveStatus(marketId) == RESOLVED` for the MVP. This keeps the UX simple and avoids mid-market creator-liquidity removal surprises.
+
+- [ ] **Step 2: Add tests**
+
+Required tests:
+- Creator can withdraw seed after market is `RESOLVED`.
+- Non-creator cannot withdraw.
+- Withdrawn USDT lands in the creator's wallet after returned YES+NO are burned.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add contracts/src/PythiaHook.sol contracts/test/PythiaHook.t.sol docs/superpowers/plans/2026-05-23-pythia-contracts.md
+git commit -m "feat(hook): add creator seed withdrawal"
 ```
 
 ### Task 4.6: Hook — `beforeSwap`, `beforeAddLiquidity` gating + `effectiveStatus` enum extension

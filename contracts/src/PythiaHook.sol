@@ -35,6 +35,10 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     uint64 public constant FORCE_RESOLVE_DELAY = 7 days;
     int24 public constant MIN_TICK = -887200;
     int24 public constant MAX_TICK = 887200;
+    address public constant BOND_BURN_SINK = address(0x000000000000000000000000000000000000dEaD);
+
+    uint8 private constant UNLOCK_OP_SEED = 1;
+    uint8 private constant UNLOCK_OP_WITHDRAW_SEED = 2;
 
     error QuestionTooLong();
     error ToolNotWhitelisted();
@@ -44,9 +48,19 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     error AlreadyResolved();
     error NotYetExpired();
     error AlreadyResolving();
+    error MarketNotResolved();
+    error InvalidChoice();
+    error InvalidUnlockOp();
 
     enum MarketStatus {
         TRADING,
+        RESOLVING,
+        RESOLVED
+    }
+
+    enum ExtendedStatus {
+        TRADING,
+        EXPIRED,
         RESOLVING,
         RESOLVED
     }
@@ -71,6 +85,12 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         uint256 liquidity;
     }
 
+    struct WithdrawSeedData {
+        uint256 marketId;
+        address to;
+        uint128 liquidityToRemove;
+    }
+
     IPoolManager public immutable poolManager;
     IERC20 public immutable usdt;
     address public immutable provider;
@@ -89,6 +109,12 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     mapping(uint256 => uint256) private _pendingIdxPlusOne;
 
     event MarketCreated(uint256 indexed marketId, address indexed creator, string question, uint64 expiry);
+    event Minted(uint256 indexed marketId, address indexed to, uint256 amount);
+    event Burned(uint256 indexed marketId, address indexed from, uint256 amount);
+    event Redeemed(uint256 indexed marketId, address indexed user, uint256 amount, uint8 winningChoice);
+    event CreatorSeedWithdrawn(
+        uint256 indexed marketId, address indexed creator, uint128 liquidityRemoved, uint256 collateralReturned
+    );
 
     constructor(address poolManager_, address usdt_, address provider_, address outcomeTokenMaster_, address admin) {
         poolManager = IPoolManager(poolManager_);
@@ -168,6 +194,69 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         emit MarketCreated(marketId, msg.sender, question, expiry);
     }
 
+    function mint(uint256 marketId, uint256 amount) external {
+        _mint(marketId, msg.sender, amount);
+    }
+
+    function mintFor(uint256 marketId, address to, uint256 amount) external {
+        _mint(marketId, to, amount);
+    }
+
+    function burn(uint256 marketId, uint256 amount) external {
+        MarketState storage m = markets[marketId];
+        if (m.creator == address(0)) revert InvalidMarket();
+        if (m.status == MarketStatus.RESOLVED) revert AlreadyResolved();
+
+        OutcomeToken(m.yesToken).burn(msg.sender, amount);
+        OutcomeToken(m.noToken).burn(msg.sender, amount);
+        require(usdt.transfer(msg.sender, amount), "usdt out failed");
+        emit Burned(marketId, msg.sender, amount);
+    }
+
+    function redeem(uint256 marketId, uint256 amount) external {
+        MarketState storage m = markets[marketId];
+        if (m.creator == address(0)) revert InvalidMarket();
+        if (m.status != MarketStatus.RESOLVED) revert("not resolved");
+
+        if (m.winningChoice == CHOICE_YES) {
+            OutcomeToken(m.yesToken).burn(msg.sender, amount);
+            require(usdt.transfer(msg.sender, amount), "usdt out failed");
+        } else if (m.winningChoice == CHOICE_NO) {
+            OutcomeToken(m.noToken).burn(msg.sender, amount);
+            require(usdt.transfer(msg.sender, amount), "usdt out failed");
+        } else if (m.winningChoice == CHOICE_INVALID) {
+            _redeemInvalid(m, amount);
+        } else {
+            revert InvalidChoice();
+        }
+
+        emit Redeemed(marketId, msg.sender, amount, m.winningChoice);
+        _settleCreatorBondIfNeeded(marketId, m);
+    }
+
+    function creatorWithdrawSeed(uint256 marketId, uint128 liquidityToRemove) external {
+        MarketState storage m = markets[marketId];
+        if (m.creator == address(0)) revert InvalidMarket();
+        require(msg.sender == m.creator, "only creator");
+        if (effectiveStatus(marketId) != ExtendedStatus.RESOLVED) revert MarketNotResolved();
+
+        poolManager.unlock(
+            abi.encode(
+                UNLOCK_OP_WITHDRAW_SEED,
+                abi.encode(WithdrawSeedData({marketId: marketId, to: msg.sender, liquidityToRemove: liquidityToRemove}))
+            )
+        );
+    }
+
+    function effectiveStatus(uint256 marketId) public view returns (ExtendedStatus) {
+        MarketState storage m = markets[marketId];
+        if (m.creator == address(0)) revert InvalidMarket();
+        if (m.status == MarketStatus.RESOLVED) return ExtendedStatus.RESOLVED;
+        if (m.status == MarketStatus.RESOLVING) return ExtendedStatus.RESOLVING;
+        if (block.timestamp > uint256(m.expiry) + RESOLUTION_GRACE) return ExtendedStatus.EXPIRED;
+        return ExtendedStatus.TRADING;
+    }
+
     function marketView(uint256 marketId)
         external
         view
@@ -194,7 +283,19 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
 
     function unlockCallback(bytes calldata rawData) external returns (bytes memory) {
         require(msg.sender == address(poolManager), "only PoolManager");
-        SeedLPData memory data = abi.decode(rawData, (SeedLPData));
+        (uint8 op, bytes memory data) = abi.decode(rawData, (uint8, bytes));
+        if (op == UNLOCK_OP_SEED) {
+            _unlockSeed(abi.decode(data, (SeedLPData)));
+        } else if (op == UNLOCK_OP_WITHDRAW_SEED) {
+            _unlockWithdrawSeed(abi.decode(data, (WithdrawSeedData)));
+        } else {
+            revert InvalidUnlockOp();
+        }
+
+        return "";
+    }
+
+    function _unlockSeed(SeedLPData memory data) internal {
         MarketState storage m = markets[data.marketId];
         if (m.creator == address(0)) revert InvalidMarket();
 
@@ -211,10 +312,39 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
             abi.encode(m.creator)
         );
 
-        _settleIfOwed(m.poolKey.currency0, delta.amount0());
-        _settleIfOwed(m.poolKey.currency1, delta.amount1());
+        _settleOrTake(m.poolKey.currency0, delta.amount0(), address(this));
+        _settleOrTake(m.poolKey.currency1, delta.amount1(), address(this));
+    }
 
-        return "";
+    function _unlockWithdrawSeed(WithdrawSeedData memory data) internal {
+        MarketState storage m = markets[data.marketId];
+        if (m.creator == address(0)) revert InvalidMarket();
+        if (effectiveStatus(data.marketId) != ExtendedStatus.RESOLVED) revert MarketNotResolved();
+
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(
+            m.poolKey,
+            ModifyLiquidityParams({
+                tickLower: MIN_TICK,
+                tickUpper: MAX_TICK,
+                liquidityDelta: -int256(uint256(data.liquidityToRemove)),
+                salt: bytes32(data.marketId)
+            }),
+            abi.encode(data.to)
+        );
+
+        uint256 amount0 = _settleOrTake(m.poolKey.currency0, delta.amount0(), address(this));
+        uint256 amount1 = _settleOrTake(m.poolKey.currency1, delta.amount1(), address(this));
+        uint256 yesAmount = m.yesIsCurrency0 ? amount0 : amount1;
+        uint256 noAmount = m.yesIsCurrency0 ? amount1 : amount0;
+        uint256 matched = yesAmount < noAmount ? yesAmount : noAmount;
+
+        if (matched > 0) {
+            OutcomeToken(m.yesToken).burn(address(this), matched);
+            OutcomeToken(m.noToken).burn(address(this), matched);
+            require(usdt.transfer(data.to, matched), "usdt out failed");
+        }
+
+        emit CreatorSeedWithdrawn(data.marketId, data.to, data.liquidityToRemove, matched);
     }
 
     function beforeInitialize(address, PoolKey calldata, uint160) external pure returns (bytes4) {
@@ -298,7 +428,18 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     }
 
     function _seedInitialLiquidity(uint256 marketId, uint256 liquidity) internal {
-        poolManager.unlock(abi.encode(SeedLPData({marketId: marketId, liquidity: liquidity})));
+        poolManager.unlock(
+            abi.encode(UNLOCK_OP_SEED, abi.encode(SeedLPData({marketId: marketId, liquidity: liquidity})))
+        );
+    }
+
+    function _mint(uint256 marketId, address to, uint256 amount) internal {
+        if (effectiveStatus(marketId) != ExtendedStatus.TRADING) revert MarketNotTrading();
+        require(usdt.transferFrom(msg.sender, address(this), amount), "usdt transfer failed");
+        MarketState storage m = markets[marketId];
+        OutcomeToken(m.yesToken).mint(to, amount);
+        OutcomeToken(m.noToken).mint(to, amount);
+        emit Minted(marketId, to, amount);
     }
 
     function _cloneOutcomeTokens(uint256 marketId, uint256 initialUsdtLiquidity)
@@ -363,12 +504,37 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         }
     }
 
-    function _settleIfOwed(Currency currency, int128 delta) internal {
-        if (delta >= 0) return;
-        uint256 amount = uint256(uint128(-delta));
-        poolManager.sync(currency);
-        IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
-        poolManager.settle();
+    function _settleOrTake(Currency currency, int128 delta, address takeTo) internal returns (uint256 credit) {
+        if (delta < 0) {
+            uint256 amount = uint256(uint128(-delta));
+            poolManager.sync(currency);
+            IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
+            poolManager.settle();
+        } else if (delta > 0) {
+            credit = uint256(uint128(delta));
+            poolManager.take(currency, takeTo, credit);
+        }
+    }
+
+    function _redeemInvalid(MarketState storage m, uint256 amount) internal {
+        if (OutcomeToken(m.yesToken).balanceOf(msg.sender) >= amount) {
+            OutcomeToken(m.yesToken).burn(msg.sender, amount);
+        } else {
+            OutcomeToken(m.noToken).burn(msg.sender, amount);
+        }
+        require(usdt.transfer(msg.sender, amount / 2), "usdt out failed");
+    }
+
+    function _settleCreatorBondIfNeeded(uint256 marketId, MarketState storage m) internal {
+        uint256 bondAmt = bond[marketId];
+        if (bondAmt == 0) return;
+
+        bond[marketId] = 0;
+        if (m.winningChoice == CHOICE_INVALID) {
+            require(usdt.transfer(BOND_BURN_SINK, bondAmt), "bond burn failed");
+        } else {
+            require(usdt.transfer(m.creator, bondAmt), "bond return failed");
+        }
     }
 
     function _toString(uint256 v) internal pure returns (string memory) {

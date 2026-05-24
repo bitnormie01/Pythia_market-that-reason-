@@ -154,7 +154,7 @@ The hook plugs directly into V4's canonical `PoolManager` on X Layer (`0x360e68f
 | `_fulfillReasoning(requestId, choice)` | Provider only | Status RESOLVING | **Wrapped in internal try/catch — MUST NEVER revert to the provider** (otherwise status freezes UNDELIVERED on the provider side, bricking the market — see §7). Internally: write winning outcome, status → RESOLVED, read CID via `provider.getRequest(requestId).reasoningCid` (which the provider stores in `_reasoningCids` mapping — see §4.1), emit `Resolved(marketId, choice, ipfsCid)`; remove from `_pendingRequestIds`. |
 | `_onFlapAIRequestRefunded(requestId)` payable | Provider only | Status RESOLVING | (1) Route OKB refund to `requestIdToRequester[requestId]` via `call{value: msg.value, gas: 100_000}` (enough for smart-contract wallets like Safe); on failure escrow to admin Safe. (2) **Clear all per-request mappings**: `delete requestIdToMarketId[requestId]`, `delete requestIdToRequester[requestId]`, `delete marketLastRequestId[marketId]`. (3) Status → TRADING (re-pokeable). (4) Remove from `_pendingRequestIds` (swap-and-pop). |
 | `forceResolve(marketId, choice)` | Admin Safe only | Status RESOLVING for ≥ 7 days **OR** `provider.getRequest(marketLastRequestId[marketId]).status == UNDELIVERED` | Escape hatch for stuck markets (see §7 for failure scenarios). Looks up the per-market `marketLastRequestId[marketId]` to query provider status. Writes outcome, status → RESOLVED, emits `ForceResolved(marketId, choice, admin)`. No CID — frontend renders "Force-resolved by admin" with link to the original IPFS proof if it exists. |
-| `redeem(marketId, amount)` | Anyone | Status RESOLVED | YES wins: burn `amount` YES → release `amount` USDT. NO wins: burn `amount` NO → release `amount` USDT. INVALID: burn `amount` of either side → release `amount/2` USDT. On first YES/NO `redeem`, creator bond is returned to creator; on first INVALID `redeem`, creator bond is burned to `address(0)`. |
+| `redeem(marketId, amount)` | Anyone | Status RESOLVED | YES wins: burn `amount` YES → release `amount` USDT. NO wins: burn `amount` NO → release `amount` USDT. INVALID: burn `amount` of either side → release `amount/2` USDT. On first YES/NO `redeem`, creator bond is returned to creator; on first INVALID `redeem`, creator bond is sent to the dead-address burn sink. |
 | `effectiveStatus(marketId)` view | — | — | Returns `TRADING / EXPIRED / RESOLVING / RESOLVED` based on stored status, `expiry`, and `RESOLUTION_GRACE`. |
 | `lastRequestId()` view | — | — | **Override required by `FlapAIConsumerBase`.** Always returns **0** (multi-market consumer; the base's singular-pending model does not apply). Use `pendingRequestIds()` for actual enumeration. Returning 0 is honest — any explorer that depends on this value will obviously break, vs. silently painting stale data with "most recent". |
 | `pendingRequestIds()` view | — | — | `external view returns (uint256[] memory)`. Returns all currently-RESOLVING request IDs from `_pendingRequestIds` storage array. Bounded by simultaneously-resolving markets (expected <50). |
@@ -210,7 +210,7 @@ Respond with only the number.
 
 - **Late resolution** — permissionless; anyone can poke after expiry + grace.
 - **Failed AI call** — refund path returns OKB to caller, market re-pokeable (idempotent resolution).
-- **Malformed question** — INVALID outcome splits collateral 50/50; creator bond is **burned to `address(0)`** (no community-fund infrastructure in MVP).
+- **Malformed question** — INVALID outcome splits collateral 50/50; creator bond is sent to the dead-address burn sink `0x000000000000000000000000000000000000dEaD` because real ERC20s commonly reject zero-address transfers (no community-fund infrastructure in MVP).
 - **AI choice out of range** — Provider validates `choice < numOfChoices` on-chain.
 - **Mint dust** — USDT and OutcomeToken both 6 decimals.
 - **Decimals** — Bridged USDT on X Layer assumed 6 decimals; must be confirmed in Day 1 discovery before mint math is wired.
@@ -231,6 +231,8 @@ Post-resolution flow for an LP:
 3. V4 swap fees accrued during the trading window remain with the LP per standard V4 accounting. The hook takes **no fee for itself** in MVP.
 
 LP economic outcome on resolution: pro-rata share of the collateral vault, plus accrued swap fees, plus directional exposure to whichever side of the pool they held more of at resolution. Standard CPMM IL applies during trading.
+
+Creator seed addendum: the seed liquidity created inside `createMarket` is hook-owned on v4-core 1.0.2 because `PoolManager.modifyLiquidity` records `msg.sender` as the position owner. The creator receives a dedicated `creatorWithdrawSeed(marketId, liquidityToRemove)` path after resolution; that path removes the hook-owned position, burns matched returned YES+NO, and transfers the released USDT collateral to the creator. Normal user-added LP positions remain user-owned and follow the standard remove-liquidity flow above.
 
 ---
 
