@@ -232,7 +232,7 @@ Post-resolution flow for an LP:
 
 LP economic outcome on resolution: pro-rata share of the collateral vault, plus accrued swap fees, plus directional exposure to whichever side of the pool they held more of at resolution. Standard CPMM IL applies during trading.
 
-Creator seed addendum: the seed liquidity created inside `createMarket` is hook-owned on v4-core 1.0.2 because `PoolManager.modifyLiquidity` records `msg.sender` as the position owner. The creator receives a dedicated `creatorWithdrawSeed(marketId, liquidityToRemove)` path after resolution; that path removes the hook-owned position, burns matched returned YES+NO, and transfers the released USDT collateral to the creator. Normal user-added LP positions remain user-owned and follow the standard remove-liquidity flow above.
+Creator seed addendum: the seed liquidity created inside `createMarket` is hook-owned on v4-core 1.0.2 because `PoolManager.modifyLiquidity` records `msg.sender` as the position owner. The creator receives a dedicated `creatorWithdrawSeed(marketId, liquidityToRemove)` path after resolution; that path removes the hook-owned position, burns matched returned YES+NO, transfers the released USDT collateral to the creator, and forwards any unmatched YES/NO tokens to the creator so winning-side excess remains redeemable after a skewed trading window. Normal user-added LP positions remain user-owned and follow the standard remove-liquidity flow above.
 
 ---
 

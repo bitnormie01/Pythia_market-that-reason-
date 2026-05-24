@@ -216,7 +216,7 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     function redeem(uint256 marketId, uint256 amount) external {
         MarketState storage m = markets[marketId];
         if (m.creator == address(0)) revert InvalidMarket();
-        if (m.status != MarketStatus.RESOLVED) revert("not resolved");
+        if (m.status != MarketStatus.RESOLVED) revert MarketNotResolved();
 
         if (m.winningChoice == CHOICE_YES) {
             OutcomeToken(m.yesToken).burn(msg.sender, amount);
@@ -342,6 +342,15 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
             OutcomeToken(m.yesToken).burn(address(this), matched);
             OutcomeToken(m.noToken).burn(address(this), matched);
             require(usdt.transfer(data.to, matched), "usdt out failed");
+        }
+
+        uint256 excessYes = yesAmount - matched;
+        uint256 excessNo = noAmount - matched;
+        if (excessYes > 0) {
+            require(OutcomeToken(m.yesToken).transfer(data.to, excessYes), "yes excess out");
+        }
+        if (excessNo > 0) {
+            require(OutcomeToken(m.noToken).transfer(data.to, excessNo), "no excess out");
         }
 
         emit CreatorSeedWithdrawn(data.marketId, data.to, data.liquidityToRemove, matched);

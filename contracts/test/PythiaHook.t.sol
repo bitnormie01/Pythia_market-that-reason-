@@ -3,15 +3,28 @@ pragma solidity 0.8.26;
 
 import "./utils/PythiaFixture.sol";
 import {Hooks} from "@uniswap/v4-core/contracts/libraries/Hooks.sol";
+import {TickMath} from "@uniswap/v4-core/contracts/libraries/TickMath.sol";
 import {PoolKey} from "@uniswap/v4-core/contracts/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/contracts/types/PoolId.sol";
+import {Currency} from "@uniswap/v4-core/contracts/types/Currency.sol";
+import {BalanceDelta} from "@uniswap/v4-core/contracts/types/BalanceDelta.sol";
+import {SwapParams} from "@uniswap/v4-core/contracts/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/contracts/libraries/StateLibrary.sol";
+import {TransientStateLibrary} from "@uniswap/v4-core/contracts/libraries/TransientStateLibrary.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PythiaHook} from "../src/PythiaHook.sol";
 import {OutcomeToken} from "../src/OutcomeToken.sol";
 
 contract PythiaHookTest is PythiaFixture {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for PoolManager;
+    using TransientStateLibrary for PoolManager;
+
+    struct SwapCallbackData {
+        address sender;
+        PoolKey key;
+        SwapParams params;
+    }
 
     function test_scaffold_constants() public view {
         assertEq(hook.POOL_FEE(), 10_000);
@@ -262,7 +275,7 @@ contract PythiaHookTest is PythiaFixture {
         _mintToBob(marketId, 10e6);
 
         vm.prank(bob);
-        vm.expectRevert(bytes("not resolved"));
+        vm.expectRevert(PythiaHook.MarketNotResolved.selector);
         hook.redeem(marketId, 1e6);
     }
 
@@ -282,6 +295,38 @@ contract PythiaHookTest is PythiaFixture {
         vm.prank(alice);
         hook.creatorWithdrawSeed(marketId, 1e6);
 
+        assertGt(usdt.balanceOf(alice), aliceBefore);
+    }
+
+    function test_creator_withdraw_returns_excess_outcome_tokens_when_pool_skewed() public {
+        (uint256 marketId, address yesT, address noT) = _createDefaultMarket();
+        _mintToBob(marketId, 50e6);
+
+        PoolKey memory key = hook.poolKey(marketId);
+        bool noForYes = Currency.unwrap(key.currency0) == noT;
+
+        vm.prank(bob);
+        OutcomeToken(noT).approve(address(this), 5e6);
+        _swapExactInput(bob, key, noForYes, 5e6);
+
+        _setResolved(marketId, hook.CHOICE_NO());
+
+        uint256 aliceBefore = usdt.balanceOf(alice);
+
+        vm.prank(alice);
+        hook.creatorWithdrawSeed(marketId, 10e6);
+
+        uint256 excessNo = OutcomeToken(noT).balanceOf(alice);
+        assertGt(excessNo, 0, "creator should receive excess winning NO");
+        assertEq(OutcomeToken(yesT).balanceOf(address(hook)), 0, "hook should not retain YES");
+        assertEq(OutcomeToken(noT).balanceOf(address(hook)), 0, "hook should not retain NO");
+
+        uint256 aliceBeforeRedeem = usdt.balanceOf(alice);
+
+        vm.prank(alice);
+        hook.redeem(marketId, excessNo);
+
+        assertEq(usdt.balanceOf(alice) - aliceBeforeRedeem, excessNo + hook.CREATOR_BOND());
         assertGt(usdt.balanceOf(alice), aliceBefore);
     }
 
@@ -316,6 +361,44 @@ contract PythiaHookTest is PythiaFixture {
         usdt.approve(address(hook), amount);
         hook.mint(marketId, amount);
         vm.stopPrank();
+    }
+
+    function _swapExactInput(address sender, PoolKey memory key, bool zeroForOne, uint256 amountIn) internal {
+        uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        poolManager.unlock(
+            abi.encode(
+                SwapCallbackData({
+                    sender: sender,
+                    key: key,
+                    params: SwapParams({
+                        zeroForOne: zeroForOne, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: limit
+                    })
+                })
+            )
+        );
+    }
+
+    function unlockCallback(bytes calldata rawData) external returns (bytes memory) {
+        require(msg.sender == address(poolManager), "only PoolManager");
+        SwapCallbackData memory data = abi.decode(rawData, (SwapCallbackData));
+        Currency input = data.params.zeroForOne ? data.key.currency0 : data.key.currency1;
+        Currency output = data.params.zeroForOne ? data.key.currency1 : data.key.currency0;
+        uint256 amountIn = uint256(-data.params.amountSpecified);
+
+        poolManager.sync(input);
+        require(IERC20(Currency.unwrap(input)).transferFrom(data.sender, address(poolManager), amountIn), "swap pay");
+        poolManager.settle();
+
+        BalanceDelta delta = poolManager.swap(data.key, data.params, "");
+        _takeCredit(output, data.sender);
+        _takeCredit(input, data.sender);
+
+        return abi.encode(delta);
+    }
+
+    function _takeCredit(Currency currency, address to) internal {
+        int256 credit = poolManager.currencyDelta(address(this), currency);
+        if (credit > 0) poolManager.take(currency, to, uint256(credit));
     }
 
     function _setResolved(uint256 marketId, uint8 choice) internal {

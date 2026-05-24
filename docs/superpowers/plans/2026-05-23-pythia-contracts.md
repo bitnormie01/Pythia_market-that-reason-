@@ -1805,7 +1805,7 @@ function burn(uint256 marketId, uint256 amount) external {
 
 function redeem(uint256 marketId, uint256 amount) external {
     MarketState storage m = markets[marketId];
-    if (m.status != MarketStatus.RESOLVED) revert("not resolved");
+    if (m.status != MarketStatus.RESOLVED) revert MarketNotResolved();
 
     if (m.winningChoice == CHOICE_YES) {
         OutcomeToken(m.yesToken).burn(msg.sender, amount);
@@ -1881,7 +1881,7 @@ struct WithdrawSeedData {
 function creatorWithdrawSeed(uint256 marketId, uint128 liquidityToRemove) external;
 ```
 
-Encode unlock data with an opcode byte so `unlockCallback` can branch between seed-add and seed-withdraw. For seed-withdraw, remove hook-owned liquidity, `take` returned YES/NO to the hook, burn the matched pair, and transfer the released USDT collateral to the creator.
+Encode unlock data with an opcode byte so `unlockCallback` can branch between seed-add and seed-withdraw. For seed-withdraw, remove hook-owned liquidity, `take` returned YES/NO to the hook, burn the matched pair, transfer the released USDT collateral to the creator, and forward any excess YES/NO tokens to the creator so winning-side excess remains redeemable after a skewed trading window.
 
 Gate `creatorWithdrawSeed` to `effectiveStatus(marketId) == RESOLVED` for the MVP. This keeps the UX simple and avoids mid-market creator-liquidity removal surprises.
 
@@ -1891,6 +1891,7 @@ Required tests:
 - Creator can withdraw seed after market is `RESOLVED`.
 - Non-creator cannot withdraw.
 - Withdrawn USDT lands in the creator's wallet after returned YES+NO are burned.
+- Skewed-pool seed withdrawal forwards unmatched winning-side outcome tokens to the creator, and those tokens can be redeemed.
 
 - [ ] **Step 3: Commit**
 
