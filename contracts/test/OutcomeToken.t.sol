@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import "forge-std/Test.sol";
 import {OutcomeToken} from "../src/OutcomeToken.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
 contract OutcomeTokenTest is Test {
     address constant HOOK = address(0xCAFE);
@@ -49,6 +50,17 @@ contract OutcomeTokenTest is Test {
         vm.prank(HOOK);
         clone.burn(address(0xB0B), 50e6);
         assertEq(clone.balanceOf(address(0xB0B)), 50e6);
+    }
+
+    function test_burn_insufficient_balance_uses_openzeppelin_v5_custom_error() public {
+        vm.prank(HOOK);
+        clone.mint(address(0xB0B), 10e6);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, address(0xB0B), 10e6, 50e6)
+        );
+        vm.prank(HOOK);
+        clone.burn(address(0xB0B), 50e6);
     }
 
     function test_clone_deploy_under_50k_gas() public {
