@@ -628,6 +628,8 @@ git commit -m "feat(frontend): TradePanel with buyYes/buyNo via Periphery + basi
 
 ### Task 2.5: ResolveButton + "Get OKB → Resolve" combined flow
 
+**Day-3 discovery update:** The UR-compatible route is USDT -> WOKB, not native OKB. Since `PythiaAIProvider.reason` is payable, the frontend must obtain native OKB before calling `hook.requestResolution{value: price}`. Use Universal Router calldata that combines `V3_SWAP_EXACT_OUT` on the direct Uniswap V3 USDT/WOKB 0.30% pool and `UNWRAP_WETH` against X Layer WOKB, then submit `requestResolution` as the second transaction. `contracts/DISCOVERY.md` verifies the WOKB address and `withdraw(uint256)` support.
+
 **Files:**
 - Modify: `frontend/components/ResolveButton.tsx`
 

@@ -1,7 +1,11 @@
 @uniswap/v4-core/contracts/=node_modules/@uniswap/v4-core/src/
+@uniswap/v4-core/src/=node_modules/@uniswap/v4-core/src/
 @uniswap/v4-core/=node_modules/@uniswap/v4-core/
 @uniswap/v4-periphery/contracts/=node_modules/@uniswap/v4-periphery/src/
+@uniswap/v4-periphery/src/=node_modules/@uniswap/v4-periphery/src/
 @uniswap/v4-periphery/=node_modules/@uniswap/v4-periphery/
 @openzeppelin/=node_modules/@openzeppelin/
+@permit2/src/=node_modules/@uniswap/permit2/src/
 @permit2/=node_modules/@uniswap/permit2/
+solmate/=node_modules/@uniswap/v4-core/lib/solmate/
 forge-std/=lib/forge-std/src/
