@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bunx --package=nx@22.0.2 nx run docs:build",
+  "outputDirectory": "docs/.vitepress/dist",
+  "installCommand": "bun install --frozen-lockfile --ignore-scripts"
+}
