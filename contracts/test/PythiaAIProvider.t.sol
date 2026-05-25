@@ -288,6 +288,39 @@ contract PythiaAIProviderTest is Test {
         assertEq(feeReceiver.balance, receiverBefore + 0.01 ether);
     }
 
+    function test_recoverUndeliveredFee_admin_recovers_to_receiver() public {
+        MockConsumer c = new MockConsumer(address(provider));
+        c.setShouldRevert(true);
+        vm.deal(address(this), 1 ether);
+        uint256 id = c.reason{value: 0.01 ether}();
+
+        vm.prank(fulfiller);
+        provider.fulfillReasoning(id, 1, "bafyUNDELIVERED");
+
+        address payable receiver = payable(address(0xCAFE));
+        uint256 receiverBefore = receiver.balance;
+
+        vm.prank(admin);
+        provider.recoverUndeliveredFee(id, receiver);
+
+        assertEq(receiver.balance - receiverBefore, 0.01 ether);
+        IFlapAIProvider.RequestView memory r = provider.getRequest(id);
+        assertEq(uint8(r.status), uint8(IFlapAIProvider.RequestStatus.REFUNDED));
+    }
+
+    function test_recoverUndeliveredFee_admin_only() public {
+        MockConsumer c = new MockConsumer(address(provider));
+        c.setShouldRevert(true);
+        vm.deal(address(this), 1 ether);
+        uint256 id = c.reason{value: 0.01 ether}();
+
+        vm.prank(fulfiller);
+        provider.fulfillReasoning(id, 1, "bafyUNDELIVERED");
+
+        vm.expectRevert();
+        provider.recoverUndeliveredFee(id, payable(address(0xCAFE)));
+    }
+
     function test_getTotalRequests_tracks_count() public {
         assertEq(provider.getTotalRequests(), 0);
 

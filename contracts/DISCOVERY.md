@@ -5,6 +5,7 @@
 | Chain ID | 196 | hardcoded |
 | Bridged USDT address | `0x779ded0c9e1022225f8e0630b35a9b54be713736` | OKX OnchainOS supported currencies docs |
 | USDT decimals | 6 | `cast call decimals()` on `https://rpc.xlayer.tech` |
+| USDT ERC20 transfer return | `transfer(address,uint256)(bool)` returns `true` for a zero-value `eth_call` | `cast call 0x779ded0c9e1022225f8e0630b35a9b54be713736 "transfer(address,uint256)(bool)" 0x0000000000000000000000000000000000000001 0 --from 0x0000000000000000000000000000000000000001 --rpc-url https://rpc.xlayer.tech` |
 | USDT/OKB routable liquidity | UR-compatible direct Uniswap V3 route confirmed: `10,000 USDT -> 120.313065446636224459 WOKB` via 0.30% USDT/WOKB pool `0x63d62734847e55a266fca4219a9ad0a02d5f6e02`; pool liquidity `263398676013757805`; OnchainOS reports `$1.91m` pool liquidity | `cast call` to X Layer QuoterV2 `0xd1b797d92d87b688193a2b976efc8d577d204343` and pool contract; Uniswap X Layer V3 deployments docs |
 | V4 PoolManager | `0x360e68faccca8ca495c1b759fd9eee466db9fb32` | docs/superpowers/specs |
 | V4 Quoter | `0x8928074ca1b241d8ec02815881c1af11e8bc5219` | docs/superpowers/specs |

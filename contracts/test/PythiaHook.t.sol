@@ -39,7 +39,9 @@ contract PythiaHookTest is PythiaFixture {
     event ResolutionRequested(uint256 indexed marketId, uint256 indexed requestId, address indexed requester);
     event Resolved(uint256 indexed marketId, uint8 choice, string reasoningCid);
     event RefundEscrowed(uint256 indexed requestId, address indexed requester, uint256 amount);
+    event OrphanRefundDelivered(uint256 indexed requestId, address indexed requester, uint256 amount);
     event ForceResolved(uint256 indexed marketId, uint8 choice, address indexed admin);
+    event StaleBondClaimed(uint256 indexed marketId, address indexed creator, uint256 amount);
 
     function test_scaffold_constants() public view {
         assertEq(hook.POOL_FEE(), 10_000);
@@ -131,6 +133,22 @@ contract PythiaHookTest is PythiaFixture {
         vm.stopPrank();
     }
 
+    function test_createMarket_rejects_disabled_model() public {
+        IFlapAIProvider.Model memory disabled =
+            IFlapAIProvider.Model({name: "disabled", price: 0.01 ether, enabled: false});
+        vm.mockCall(
+            address(provider),
+            abi.encodeWithSelector(IFlapAIProvider.getModel.selector, uint256(1)),
+            abi.encode(disabled)
+        );
+
+        vm.startPrank(alice);
+        usdt.approve(address(hook), 15e6);
+        vm.expectRevert(bytes("model disabled"));
+        hook.createMarket("q?", uint64(block.timestamp + 1 days), _tools(), 1, 10e6);
+        vm.stopPrank();
+    }
+
     function test_admin_can_whitelist_tools_at_deploy() public view {
         assertTrue(hook.allowedTools(keccak256("ave_token_tool")));
         assertTrue(hook.allowedTools(keccak256("ave_token_info")));
@@ -158,6 +176,13 @@ contract PythiaHookTest is PythiaFixture {
         assertEq(hook._creatorLpWindowEnd(marketId), startBlock + 60);
         PoolKey memory key = hook.poolKey(marketId);
         assertGt(StateLibrary.getLiquidity(poolManager, key.toId()), 0, "seed should bypass creator-only window");
+    }
+
+    function test_poolIdToMarketId_tracks_created_market() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        PoolKey memory key = hook.poolKey(marketId);
+
+        assertEq(hook.poolIdToMarketId(key.toId()), marketId);
     }
 
     function test_mint_pulls_usdt_and_issues_matched_pair() public {
@@ -292,6 +317,24 @@ contract PythiaHookTest is PythiaFixture {
         assertEq(usdt.balanceOf(hook.BOND_BURN_SINK()) - sinkBefore, hook.CREATOR_BOND());
         assertEq(hook.bond(marketId), 0);
         assertEq(OutcomeToken(yesT).balanceOf(bob), 20e6);
+    }
+
+    function test_redeem_invalid_auto_splits_yes_and_no_balances() public {
+        (uint256 marketId, address yesT, address noT) = _createDefaultMarket();
+        _mintToBob(marketId, 30e6);
+        _setResolved(marketId, hook.CHOICE_INVALID());
+
+        vm.prank(bob);
+        OutcomeToken(yesT).transfer(alice, 20e6);
+
+        uint256 bobBefore = usdt.balanceOf(bob);
+
+        vm.prank(bob);
+        hook.redeem(marketId, 20e6);
+
+        assertEq(usdt.balanceOf(bob) - bobBefore, 10e6);
+        assertEq(OutcomeToken(yesT).balanceOf(bob), 0);
+        assertEq(OutcomeToken(noT).balanceOf(bob), 20e6);
     }
 
     function test_redeem_reverts_before_resolution() public {
@@ -532,7 +575,7 @@ contract PythiaHookTest is PythiaFixture {
         (,,,, PythiaHook.MarketStatus status,,) = hook.marketView(marketId);
         assertEq(uint8(status), uint8(PythiaHook.MarketStatus.RESOLVED));
         assertEq(hook.requestIdToMarketId(requestId), 0);
-        assertEq(hook.requestIdToRequester(requestId), address(0));
+        assertEq(hook.requestIdToRequester(requestId), bob);
         assertEq(hook.marketLastRequestId(marketId), requestId);
         assertEq(hook.pendingRequestCount(), 0);
     }
@@ -549,9 +592,32 @@ contract PythiaHookTest is PythiaFixture {
         (,,,, PythiaHook.MarketStatus status,,) = hook.marketView(marketId);
         assertEq(uint8(status), uint8(PythiaHook.MarketStatus.RESOLVED));
         assertEq(hook.requestIdToMarketId(requestId), 0);
-        assertEq(hook.requestIdToRequester(requestId), address(0));
+        assertEq(hook.requestIdToRequester(requestId), bob);
         assertEq(hook.marketLastRequestId(marketId), requestId);
         assertEq(hook.pendingRequestCount(), 0);
+    }
+
+    function test_orphan_refund_routes_to_original_requester_after_forceResolve() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        uint256 price = _modelPrice();
+        uint256 requestId = _requestResolutionFrom(bob, marketId, price);
+        uint8 choice = hook.CHOICE_YES();
+
+        vm.warp(block.timestamp + hook.FORCE_RESOLVE_DELAY() + 1);
+        vm.prank(admin);
+        hook.forceResolve(marketId, choice);
+
+        uint256 bobBefore = bob.balance;
+
+        vm.expectEmit(true, true, false, true, address(hook));
+        emit OrphanRefundDelivered(requestId, bob, price);
+        vm.prank(fulfiller);
+        provider.refundRequest(requestId);
+
+        assertEq(bob.balance - bobBefore, price);
+        assertEq(hook.requestIdToRequester(requestId), address(0));
+        (,,,, PythiaHook.MarketStatus status,,) = hook.marketView(marketId);
+        assertEq(uint8(status), uint8(PythiaHook.MarketStatus.RESOLVED));
     }
 
     function test_forceResolve_reverts_before_conditions_met() public {
@@ -573,6 +639,22 @@ contract PythiaHookTest is PythiaFixture {
         vm.expectRevert();
         vm.prank(bob);
         hook.forceResolve(marketId, choice);
+    }
+
+    function test_forceResolve_resolves_never_RESOLVING_expired_market_after_delay() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        uint8 choice = hook.CHOICE_NO();
+
+        _warpExpired();
+        vm.warp(block.timestamp + hook.FORCE_RESOLVE_DELAY() + 1);
+
+        vm.prank(admin);
+        hook.forceResolve(marketId, choice);
+
+        (,,,, PythiaHook.MarketStatus status,,) = hook.marketView(marketId);
+        assertEq(uint8(status), uint8(PythiaHook.MarketStatus.RESOLVED));
+        assertEq(hook.marketLastRequestId(marketId), 0);
+        assertEq(hook.pendingRequestCount(), 0);
     }
 
     function test_getMarkets_returns_newest_first() public {
@@ -621,6 +703,32 @@ contract PythiaHookTest is PythiaFixture {
         assertGt(usdt.balanceOf(alice), aliceBefore);
     }
 
+    function test_creatorWithdrawSeed_settles_bond_to_creator_on_yes_no_win() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        _setResolved(marketId, hook.CHOICE_YES());
+
+        uint256 aliceBefore = usdt.balanceOf(alice);
+
+        vm.prank(alice);
+        hook.creatorWithdrawSeed(marketId, 1e6);
+
+        assertEq(hook.bond(marketId), 0);
+        assertGe(usdt.balanceOf(alice) - aliceBefore, hook.CREATOR_BOND());
+    }
+
+    function test_creatorWithdrawSeed_burns_bond_on_INVALID() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        _setResolved(marketId, hook.CHOICE_INVALID());
+
+        uint256 sinkBefore = usdt.balanceOf(hook.BOND_BURN_SINK());
+
+        vm.prank(alice);
+        hook.creatorWithdrawSeed(marketId, 1e6);
+
+        assertEq(hook.bond(marketId), 0);
+        assertEq(usdt.balanceOf(hook.BOND_BURN_SINK()) - sinkBefore, hook.CREATOR_BOND());
+    }
+
     function test_creator_withdraw_returns_excess_outcome_tokens_when_pool_skewed() public {
         (uint256 marketId, address yesT, address noT) = _createDefaultMarket();
         _mintToBob(marketId, 50e6);
@@ -649,8 +757,25 @@ contract PythiaHookTest is PythiaFixture {
         vm.prank(alice);
         hook.redeem(marketId, excessNo);
 
-        assertEq(usdt.balanceOf(alice) - aliceBeforeRedeem, excessNo + hook.CREATOR_BOND());
+        assertEq(usdt.balanceOf(alice) - aliceBeforeRedeem, excessNo);
         assertGt(usdt.balanceOf(alice), aliceBefore);
+    }
+
+    function test_claimStaleBond_returns_bond_to_creator() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        _setResolved(marketId, hook.CHOICE_YES());
+        vm.warp(block.timestamp + 31 days);
+
+        uint256 creatorBond = hook.CREATOR_BOND();
+        uint256 aliceBefore = usdt.balanceOf(alice);
+
+        vm.expectEmit(true, true, false, true, address(hook));
+        emit StaleBondClaimed(marketId, alice, creatorBond);
+        vm.prank(admin);
+        hook.claimStaleBond(marketId);
+
+        assertEq(usdt.balanceOf(alice) - aliceBefore, creatorBond);
+        assertEq(hook.bond(marketId), 0);
     }
 
     function test_non_creator_cannot_withdraw_seed() public {

@@ -151,6 +151,18 @@ contract PythiaAIProvider is IFlapAIProvider, AccessControl {
         require(ok, "sweep failed");
     }
 
+    function recoverUndeliveredFee(uint256 requestId, address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        Request storage r = _requests[requestId];
+        if (r.status != RequestStatus.UNDELIVERED) revert FlapAIProviderRequestNotPending(requestId);
+
+        uint256 refund = uint256(r.feePaid);
+        r.status = RequestStatus.REFUNDED;
+        (bool ok,) = to.call{value: refund}("");
+        require(ok, "recovery failed");
+
+        emit FlapAIProviderRequestRefunded(requestId, r.consumer, refund);
+    }
+
     function getTotalRequests() external view returns (uint256 total) {
         return _nextRequestId - 1;
     }

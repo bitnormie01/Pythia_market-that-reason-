@@ -1449,7 +1449,6 @@ struct MarketState {
     address creator;
     bool yesIsCurrency0;
     PoolKey poolKey;
-    uint64 creationBlock;
     address yesToken;
     address noToken;
     uint8 winningChoice;
@@ -1462,6 +1461,7 @@ mapping(bytes32 => bool) public allowedTools;
 mapping(uint256 => MarketState) public markets;
 mapping(uint256 => uint256) public bond;
 mapping(uint256 => uint64) public _creatorLpWindowEnd;
+mapping(PoolId => uint256) public poolIdToMarketId;
 uint256[] private _marketIds;
 uint256 private _nextMarketId = 1;
 
@@ -1503,12 +1503,13 @@ function createMarket(
         if (!allowedTools[tools[i]]) revert ToolNotWhitelisted();
     }
 
-    // Verify model exists on provider
-    IFlapAIProvider(provider).getModel(modelId); // reverts if unregistered
+    // Verify model exists and is enabled on provider
+    IFlapAIProvider.Model memory mdl = IFlapAIProvider(provider).getModel(modelId); // reverts if unregistered
+    require(mdl.enabled, "model disabled");
 
-    // Pull bond + initial liquidity USDT in one transferFrom
+    // Pull bond + initial liquidity USDT in one SafeERC20 transferFrom
     uint256 total = CREATOR_BOND + initialUsdtLiquidity;
-    require(usdt.transferFrom(msg.sender, address(this), total), "usdt transfer failed");
+    usdt.safeTransferFrom(msg.sender, address(this), total);
 
     marketId = _nextMarketId++;
     _marketIds.push(marketId);
@@ -1546,11 +1547,11 @@ function createMarket(
         creator: msg.sender,
         yesIsCurrency0: yesIs0,
         poolKey: pk,
-        creationBlock: uint64(block.number),
         yesToken: yesT,
         noToken: noT,
         winningChoice: type(uint8).max
     });
+    poolIdToMarketId[pk.toId()] = marketId;
 
     // Initialize pool at price 1:1 (sqrt(1) * 2^96)
     uint160 sqrtPriceX96 = 79228162514264337593543950336; // 2^96
@@ -2146,14 +2147,25 @@ function fulfillInternal(uint256 requestId, uint8 choice) external {
 }
 
 function _onFlapAIRequestRefunded(uint256 requestId) internal override {
+    address originalRequester = requestIdToRequester[requestId];
     uint256 marketId = requestIdToMarketId[requestId];
+
+    // Orphan-refund path after forceResolve cleared requestIdToMarketId but kept requester routing.
+    if (marketId == 0 && originalRequester != address(0)) {
+        delete requestIdToRequester[requestId];
+        if (msg.value > 0) {
+            (bool ok,) = originalRequester.call{value: msg.value, gas: 100_000}("");
+            if (!ok) emit RefundEscrowed(requestId, originalRequester, msg.value);
+            else emit OrphanRefundDelivered(requestId, originalRequester, msg.value);
+        }
+        return;
+    }
+
     if (marketId == 0) return;
     MarketState storage m = markets[marketId];
     if (m.status != MarketStatus.RESOLVING) return;
 
-    address originalRequester = requestIdToRequester[requestId];
-
-    // Clean up all mappings
+    // Clean up normal refund mappings
     delete requestIdToMarketId[requestId];
     delete requestIdToRequester[requestId];
     delete marketLastRequestId[marketId];
@@ -2267,26 +2279,33 @@ function forceResolve(uint256 marketId, uint8 choice) external onlyRole(DEFAULT_
 
     MarketState storage m = markets[marketId];
     if (m.creator == address(0)) revert InvalidMarket();
-    if (m.status != MarketStatus.RESOLVING) revert ForceResolveUnavailable();
+    if (m.status == MarketStatus.RESOLVED) revert AlreadyResolved();
 
-    uint256 reqId = marketLastRequestId[marketId];
-    bool sevenDays = block.timestamp > m.expiry + RESOLUTION_GRACE + FORCE_RESOLVE_DELAY;
-    bool undelivered;
-    if (reqId != 0) {
-        IFlapAIProvider.RequestStatus provStat = IFlapAIProvider(provider).getRequest(reqId).status;
-        undelivered = provStat == IFlapAIProvider.RequestStatus.UNDELIVERED;
+    ExtendedStatus es = effectiveStatus(marketId);
+    bool staleExpired =
+        es == ExtendedStatus.EXPIRED && block.timestamp > m.expiry + RESOLUTION_GRACE + FORCE_RESOLVE_DELAY;
+
+    if (m.status == MarketStatus.RESOLVING) {
+        uint256 reqId = marketLastRequestId[marketId];
+        bool sevenDays = block.timestamp > m.expiry + RESOLUTION_GRACE + FORCE_RESOLVE_DELAY;
+        bool undelivered;
+        if (reqId != 0) {
+            IFlapAIProvider.RequestStatus provStat = IFlapAIProvider(provider).getRequest(reqId).status;
+            undelivered = provStat == IFlapAIProvider.RequestStatus.UNDELIVERED;
+        }
+        if (!sevenDays && !undelivered) revert ForceResolveUnavailable();
+
+        if (reqId != 0) {
+            delete requestIdToMarketId[reqId];
+            _popPending(reqId);
+        }
+        // Keep requestIdToRequester for orphan-refund routing; keep marketLastRequestId for FE proof linkage.
+    } else if (!staleExpired) {
+        revert ForceResolveUnavailable();
     }
-    if (!sevenDays && !undelivered) revert ForceResolveUnavailable();
 
     m.winningChoice = choice;
     m.status = MarketStatus.RESOLVED;
-
-    if (reqId != 0) {
-        delete requestIdToMarketId[reqId];
-        delete requestIdToRequester[reqId];
-        _popPending(reqId);
-    }
-    // Keep marketLastRequestId for frontend proof linkage.
 
     emit ForceResolved(marketId, choice, msg.sender);
 }

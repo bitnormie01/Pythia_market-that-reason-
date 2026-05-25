@@ -170,6 +170,7 @@ contract MineAndDeployHook is Script {
 
         // 1. Deploy OutcomeToken master (no special address needed)
         master = new OutcomeToken();
+        master.initialize(address(0xdEaD), "OutcomeToken-Master", "PYM-MASTER");
         console.log("OutcomeToken master:", address(master));
 
         // 2. Mine the hook address
