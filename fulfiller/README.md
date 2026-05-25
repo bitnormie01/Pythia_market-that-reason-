@@ -34,40 +34,36 @@ npm run start
 | `processor.ts` | event → run → pin → submit; refund-on-failure; startup replay |
 | `index.ts` | wires the loop, optional Better Stack heartbeat, graceful shutdown |
 
-## Local anvil smoke procedure
+## Local Anvil Smoke Procedure
 
-1. **Terminal 1 — fork X Layer**
+1. **Terminal 1 — start anvil with X Layer chain ID**
 
    ```bash
-   anvil --fork-url https://rpc.xlayer.tech --port 8545
+   anvil --chain-id 196 --port 8545
    ```
 
-2. **Terminal 2 — deploy contracts onto the fork**
-
-   Use the Foundry script from Plan 4 (`script/Deploy.s.sol`) pointed at the local anvil RPC. Capture the deployed `PythiaAIProvider` address.
-
-3. **Terminal 3 — start the fulfiller against the fork**
+2. **Terminal 2 — run the deterministic smoke**
 
    ```bash
-   XLAYER_RPC_URL=http://localhost:8545 \
-   PYTHIA_AI_PROVIDER_ADDRESS=0x... \
-   PYTHIA_HOOK_ADDRESS=0x... \
-   FULFILLER_PRIVATE_KEY=0x<anvil-default-key-0> \
+   npm run smoke:local
+   ```
+
+   The script deploys `PythiaAIProvider`, starts the real event watcher, submits a `reason()` request, processes it with mocked LLM/IPFS dependencies, sends a real `fulfillReasoning` transaction, and verifies the request is `FULFILLED` on-chain.
+
+3. **Optional live-provider mode**
+
+   ```bash
    ANTHROPIC_API_KEY=sk-ant-... \
    PINATA_JWT=... \
-   npm run dev
+   SMOKE_LIVE=1 \
+   npm run smoke:local
    ```
 
-4. **Trigger a request**
+   Live mode uses the same local chain path but calls Anthropic and Pinata instead of the deterministic mocks.
 
-   From a mock consumer (or `cast send`), invoke `reason()` on the provider with `feePaid`, a prompt, and `numOfChoices=3`. The fulfiller log should show:
-   - `FlapAIProviderRequestMade` log received
-   - Anthropic tool-use loop (one or more `tool_call` lines)
-   - `fulfillReasoning tx submitted` then `fulfillReasoning tx confirmed`
+4. **Inspect the trail**
 
-5. **Inspect the trail**
-
-   The fulfilled row in `pythia-fulfiller.sqlite` carries the CID. Fetch the trail JSON from either `gateway.pinata.cloud/ipfs/<cid>` or `cloudflare-ipfs.com/ipfs/<cid>`.
+   The fulfilled row in `.tmp/local-smoke.sqlite` carries the CID. In live mode, fetch the trail JSON from either `gateway.pinata.cloud/ipfs/<cid>` or `cloudflare-ipfs.com/ipfs/<cid>`.
 
 ## Crash recovery
 
