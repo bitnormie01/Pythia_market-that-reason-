@@ -64,8 +64,8 @@ The hook plugs directly into V4's canonical `PoolManager` on X Layer (`0x360e68f
   │       └─ Views: getModel / getRequest / etc.                     │
   │                                                                  │
   │   PythiaPeriphery (V4 swap wrapper — calls poolManager.unlock    │
-  │       directly with sync/settle/take; one-tx atomic buy flow     │
-  │       via Permit2 USDT + hook.mintFor; handles YES↔NO direction) │
+  │       directly with sync/settle/take; one-tx atomic buy/sell     │
+  │       via USDT/outcome approvals; handles YES↔NO direction)      │
   │       ├─ buyYes(marketId, usdtIn, minYesOut)                     │
   │       ├─ buyNo  (symmetric)                                      │
   │       └─ sellYes / sellNo                                        │
@@ -472,7 +472,7 @@ Pre-demo dry run: 30 minutes before recording, walk through the exact recording 
 | wagmi v2 + viem | Type-safe contract calls + event watching |
 | TanStack Query | Standard read-cache |
 | RainbowKit | Wallet connector — **OKX Wallet listed first** (judges' likely wallet) |
-| Permit2 | One-signature USDT approval flow via Periphery |
+| Permit2 | Follow-up one-signature USDT approval flow; MVP uses standard ERC20 approvals to Periphery |
 | Quoter (V4) | Spot quote `0x8928074ca1b241d8ec02815881c1af11e8bc5219` for sub-100ms quotes |
 | Tailwind + shadcn/ui | Fast polished UI |
 | `@vercel/og` | Auto-generated OG cards for proof and market links |
@@ -509,24 +509,24 @@ export const xLayer = defineChain({
 |---|---|
 | **OKX Wallet first-class** | Judges on X Layer will reach for OKX Wallet first |
 | **"Get OKB → Resolve"** combined button | Detect zero OKB balance; route a small USDT→WOKB swap via Universal Router (V3/V2 pools — not V4), then unwrap WOKB to native OKB before `requestResolution{value: price}`. Day 3 discovery confirms ≥$10k liquidity on a UR-routable direct Uniswap V3 USDT/WOKB venue and verifies WOKB has `withdraw(uint256)`. Hackathon scope: two transactions total — (1) UR `V3_SWAP_EXACT_OUT` + `UNWRAP_WETH`, (2) `requestResolution`. |
-| **One-tx atomic buy/sell flow via `PythiaPeriphery`** | Universal Router's V4_SWAP command encoding (PoolKey + V4Router actions) is non-trivial and would eat hours of debugging. Instead **PythiaPeriphery calls `poolManager.unlock` directly** with the proper `sync → transfer → settle → swap → take` choreography. UR stays out of the trade path entirely (used only for USDT→OKB hop on V3/V2 pools). UX: `periphery.buyYes(marketId, usdtIn, minOut, permit2Sig)` is a single tx + Permit2 sig. Internally it uses `hook.mintFor(periphery, amount)` so the Periphery already holds the matched NO before swapping. See §5.4.1 for the full sequence. |
-| **Slippage protection on every Periphery swap** | All buy/sell functions take `minOut` and read live quotes from V4 Quoter to compute it. Without minOut, the demo could be sandwiched live on camera. |
+| **One-tx atomic buy/sell flow via `PythiaPeriphery`** | Universal Router's V4_SWAP command encoding (PoolKey + V4Router actions) is non-trivial and would eat hours of debugging. Instead **PythiaPeriphery calls `poolManager.unlock` directly** with the proper `sync → transfer → settle → swap → take` choreography. UR stays out of the trade path entirely (used only for USDT→OKB hop on V3/V2 pools). MVP UX: one-time ERC20 approval, then `periphery.buyYes(marketId, usdtIn, minOut)` or symmetric buy/sell function. Internally buys use `hook.mintFor(periphery, amount)` so the Periphery already holds the matched unwanted leg before swapping. See §5.4.1 for the full sequence. Permit2 signature flow is a follow-up. |
+| **Slippage protection on every Periphery swap** | All buy/sell functions take `minOut`; the frontend reads V4 Quoter to compute it. Without minOut, the demo could be sandwiched live on camera. |
 | **Quoter for spot quotes** | "Receive ≈ 14.9 YES" is accurate, not vibes |
 | **Mobile reflow** | Trade + market info stack vertically below `md` |
 | **Auto-share on Resolved** | Twitter card auto-tagging `@XLayerOfficial @Uniswap @flapdotsh` — satisfies hackathon requirement organically |
 | **Network mismatch handler** | RainbowKit's auto-switch on wrong chain |
 | **Live "Resolving…" indicator** | Listens to `RequestMade` → `RequestFulfilled` events for progress |
 
-### 5.4.1 Buy / sell flow detail (canonical two-tx path)
+### 5.4.1 Buy / sell flow detail (MVP approval path)
 
 ```
 User clicks "Buy YES for 10 USDT"
        │
        ▼
 User clicks "Buy YES for 10 USDT":
-  1. Sign Permit2 message authorizing Periphery to pull 10 USDT (free, off-chain).
-  2. Submit periphery.buyYes(marketId, 10e6, minOut, permit2Signature):
-       a. Periphery uses Permit2 to pull 10 USDT from user → Periphery
+  1. If needed, approve Periphery to spend USDT.
+  2. Submit periphery.buyYes(marketId, 10e6, minOut):
+       a. Periphery pulls 10 USDT from user → Periphery
        b. Periphery calls hook.mintFor(marketId, address(periphery), 10e6)
               → hook pulls 10 USDT from Periphery (it just got them),
                 mints 10 YES + 10 NO TO the Periphery
@@ -540,11 +540,12 @@ User clicks "Buy YES for 10 USDT":
                    where yesOut = uint256(int256(delta)) and delta is the
                    YES-currency credit returned by swap(); MUST equal the credit
                    exactly so all deltas net to zero before unlock returns
-       d. Verify yesOut ≥ minOut; revert if not (slippage protection)
-  3. Toast: "Bought {yesOut} YES for 10 USDT" — single tx, single signature.
+       d. Transfer the directly minted 10 YES to the user.
+       e. Verify total YES out = minted YES + swapped YES ≥ minOut; revert if not.
+  3. Toast: "Bought {yesOut} YES for 10 USDT" — one approval setup, then one buy tx.
 ```
 
-**Why this is one-tx not two-tx**: `hook.mintFor(marketId, to, amount)` lets the Periphery mint matched YES+NO directly to itself, so it already holds the NO it needs to swap in step c. No user→Periphery approval, no second tx. The previous "two-tx canonical" framing was over-engineered.
+**Why this is one buy/sell tx after approval**: `hook.mintFor(marketId, to, amount)` lets the Periphery mint matched YES+NO directly to itself, so it already holds the NO it needs to swap in step c. Standard ERC20 approval is the MVP path; Permit2 can replace the approval step later without changing the V4 swap choreography.
 
 **Why Periphery owns the swap, not Universal Router**: V4 swaps require `unlock`/`sync`/`settle`/`take` choreography. Encoding the equivalent through UR's V4_SWAP command means building V4Router action/param byte sequences manually — well-documented but a known time-sink. A purpose-built ~200-line Periphery contract is faster to write and easier to test than wrestling with UR encoding for our specific case.
 
@@ -552,7 +553,7 @@ User clicks "Buy YES for 10 USDT":
 
 **Slippage**: `minOut` computed off-chain from V4 Quoter; user-adjustable in advanced UI. Mandatory on every Periphery call — no zero-default. Defense against the demo-day sandwich.
 
-**Sell flow is symmetric**: `periphery.sellYes(marketId, yesIn, minUsdtOut, ...)` — pulls YES via approval/permit, swaps YES→NO in unlock, then `hook.burn(marketId, matchedAmount)` returns USDT. Mirror image of buy.
+**Sell flow**: `periphery.sellYes(marketId, yesIn, minUsdtOut)` pulls YES via approval, swaps half the submitted YES into NO in `unlock`, burns the matched YES+NO pair through `hook.burn`, forwards USDT to the user, and returns any unmatched outcome-token excess. `sellNo` mirrors this by swapping NO→YES.
 
 ### 5.5 The proof viewer (the moment that wins)
 
@@ -594,7 +595,7 @@ test/
 │   └── PythiaAIProvider.storage.t.sol       - slot-layout assertions
 ├── integration/
 │   ├── full-market-lifecycle.t.sol
-│   └── periphery-buy-sell.t.sol             - Periphery sync/settle/take + one-tx atomic buy via mintFor + Permit2
+│   └── periphery-buy-sell.t.sol             - Periphery sync/settle/take + atomic buy/sell via mintFor/burn
 └── invariant/
     └── CollateralInvariant.t.sol            - vault == totalSupply pre/post resolution
 ```
@@ -641,10 +642,9 @@ DAY 2 — May 24
 
 DAY 3 — May 25
   [3h] Resolution flow end-to-end (request → reason → callback → settle)
-  [5h] Periphery: poolManager.unlock + sync/settle/take + hook.mintFor + Permit2 + Quoter
+  [5h] Periphery: poolManager.unlock + sync/settle/take + hook.mintFor/burn + approval path
        (~200 LOC contract + Foundry tests + cross-clone-ordering coverage)
-       **Day-3 fallback if Periphery isn't working by EOD**: ship without Periphery
-       (see hard-cuts #6); frontend uses hook.mint + wallet-driven raw poolManager.swap
+       Permit2 signature flow remains a follow-up on top of the working approval path.
   [2h] pythia-fulfiller v0: Anthropic + IPFS pin + submit
 
 DAY 4 — May 26
@@ -669,8 +669,8 @@ DAY 6 — May 28 (slack day → submission)
 2. OG cards
 3. `onchain_read_tool` (keep `ave_token_tool` only)
 4. Quoter integration (approximate quotes)
-5. Permit2 signature flow (fall back to standard `approve` + `mint`)
-6. **PythiaPeriphery entirely** — if `poolManager.unlock` choreography isn't working by end of Day 3, ship without Periphery. Frontend UX becomes: (1) `hook.mint(usdtAmount)` for matched YES+NO, (2) user signs a raw `poolManager.swap` tx from wallet UI (Pythia frontend constructs the calldata and shows it for signing — uses MEV-protected RPC if available). Rough UX, no slippage protection on the swap tx beyond what the wallet shows, but functionally complete and Foundry-tested independently.
+5. Permit2 signature flow (MVP uses standard approvals)
+6. PythiaPeriphery enhancements beyond the tested approval path (Quoter integration, Permit2, exact-output sell ergonomics)
 
 **Cannot be cut**:
 - PythiaHook + V4 Pool initialized on X Layer mainnet

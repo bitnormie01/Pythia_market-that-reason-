@@ -4,7 +4,7 @@
 
 **Goal:** Build, test, and source-verify the four core Pythia smart contracts (`OutcomeToken`, `PythiaAIProvider`, `PythiaHook`, `PythiaPeriphery`) on X Layer mainnet, with Foundry unit + invariant + fork tests passing, ready for the off-chain fulfiller and frontend to consume.
 
-**Architecture:** Singleton V4 hook owns the full prediction-market lifecycle (mint / trade / resolve / redeem). EIP-1167 clones for outcome tokens. Custom `IFlapAIProvider`-compatible AI oracle on X Layer (one-line swappable to real Flap when it deploys). Periphery contract handles one-tx atomic buy via Permit2 + `hook.mintFor` + `poolManager.unlock`.
+**Architecture:** Singleton V4 hook owns the full prediction-market lifecycle (mint / trade / resolve / redeem). EIP-1167 clones for outcome tokens. Custom `IFlapAIProvider`-compatible AI oracle on X Layer (one-line swappable to real Flap when it deploys). Periphery contract handles one-tx atomic buy/sell after ERC20 approval via `hook.mintFor`/`hook.burn` + `poolManager.unlock`; Permit2 signatures are a follow-up.
 
 **Tech Stack:** Solidity 0.8.26 (pinned), Foundry (forge + cast + anvil), Uniswap V4 core + periphery libraries, OpenZeppelin v5 contracts (AccessControl, ERC20, Clones, ReentrancyGuard), Permit2 SDK.
 
@@ -2339,230 +2339,81 @@ git commit -m "feat(hook): forceResolve admin escape + getMarkets paginated view
 
 ---
 
-## Phase 5 — PythiaPeriphery (one-tx atomic buy)
+## Phase 5 — PythiaPeriphery (one-tx atomic buy/sell after approval)
 
-### Task 5.1: Periphery — scaffold + buyYes signature + Permit2 wiring
+### Task 5.1: Periphery — V4 unlock wrapper
 
 **Files:**
-- Create: `contracts/src/PythiaPeriphery.sol`
-- Create: `contracts/test/PythiaPeriphery.t.sol`
+- Created: `contracts/src/PythiaPeriphery.sol`
+- Created: `contracts/test/PythiaPeriphery.t.sol`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Implement public buy/sell surface**
 
-`contracts/test/PythiaPeriphery.t.sol`:
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+Implemented:
+- `buyYes(marketId, usdtIn, minYesOut)`
+- `buyNo(marketId, usdtIn, minNoOut)`
+- `sellYes(marketId, yesIn, minUsdtOut)`
+- `sellNo(marketId, noIn, minUsdtOut)`
 
-import "./utils/PythiaFixture.sol";
-import {PythiaPeriphery} from "../src/PythiaPeriphery.sol";
+MVP approval model:
+- `buy*` uses standard USDT `transferFrom` after a user approval to the Periphery.
+- `sell*` uses standard outcome-token `transferFrom` after a user approval to the Periphery.
+- The `permit2` constructor arg is retained for deployment compatibility and future signature flow, but Permit2 signatures are deferred.
 
-contract PythiaPeripheryBuyTest is PythiaFixture {
-    PythiaPeriphery periphery;
-    uint256 marketId;
+- [x] **Step 2: Implement `poolManager.unlock` swap choreography**
 
-    function setUp() public override {
-        super.setUp();
-        periphery = new PythiaPeriphery(
-            address(hook),
-            address(poolManager),
-            address(0xPERMIT2), // placeholder for test
-            address(usdt)
-        );
+`unlockCallback`:
+- rejects non-PoolManager callers
+- reads `hook.poolKey(marketId)` and `hook.marketView(marketId).yesIsCurrency0`
+- derives `zeroForOne` from the desired input leg so YES/NO address ordering is always correct
+- performs `sync(input) → input.transfer(PoolManager) → settle() → swap() → take(output, recipient)`
+- takes any residual input credit back to the recipient to avoid periphery dust
 
-        bytes32[] memory tools = new bytes32[](1);
-        tools[0] = keccak256("ave_token_tool");
-        vm.startPrank(alice);
-        usdt.approve(address(hook), 100e6);
-        marketId = hook.createMarket("q?", uint64(block.timestamp + 1 days), tools, 1, 100e6);
-        vm.stopPrank();
-    }
+- [x] **Step 3: Implement buy path**
 
-    function test_buyYes_atomically_swaps_user_USDT_to_YES() public {
-        vm.startPrank(bob);
-        usdt.approve(address(periphery), 10e6);
-        uint256 yesBefore = OutcomeToken(hook.markets(marketId).yesToken).balanceOf(bob);
-        // For unit test we skip Permit2 and assume periphery has direct approval
-        periphery.buyYes(marketId, 10e6, 5e6 /* minOut, generous */);
-        uint256 yesAfter = OutcomeToken(hook.markets(marketId).yesToken).balanceOf(bob);
-        assertGt(yesAfter, yesBefore + 10e6); // mint matched + swap NO→YES = >10 YES
-        vm.stopPrank();
-    }
-}
-```
+`buyYes` / `buyNo`:
+- pull USDT into Periphery
+- approve and call `hook.mintFor(marketId, address(this), usdtIn)`
+- swap the unwanted leg through V4
+- transfer the directly minted desired leg to the user
+- enforce `minOut` against total desired output (`minted desired + swapped desired`)
 
-- [ ] **Step 2: Run; expect fail (Periphery missing)**
+- [x] **Step 4: Implement sell path**
 
-```bash
-forge test --match-path test/PythiaPeriphery.t.sol -vv
-```
+`sellYes` / `sellNo`:
+- pull the submitted outcome tokens into Periphery
+- swap half the submitted amount into the opposite leg
+- burn the matched YES+NO pair through `hook.burn`
+- forward USDT to the user
+- return any unmatched YES/NO excess to the user
 
-- [ ] **Step 3: Implement Periphery**
+This first-cut sell flow is intentionally conservative: it always avoids trapped outcome-token dust in the Periphery, but it may return a residual outcome-token balance when the pool price is skewed. Exact-output sell ergonomics can be improved after Quoter integration.
 
-`contracts/src/PythiaPeriphery.sol`:
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+### Task 5.2: Periphery tests
 
-import {IPoolManager} from "@uniswap/v4-core/contracts/interfaces/IPoolManager.sol";
-import {PoolKey} from "@uniswap/v4-core/contracts/types/PoolKey.sol";
-import {Currency} from "@uniswap/v4-core/contracts/types/Currency.sol";
-import {BalanceDelta} from "@uniswap/v4-core/contracts/types/BalanceDelta.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {PythiaHook} from "./PythiaHook.sol";
-import {OutcomeToken} from "./OutcomeToken.sol";
+- [x] **Step 1: Cover YES-as-currency0 and YES-as-currency1 markets**
 
-contract PythiaPeriphery {
-    PythiaHook public immutable hook;
-    IPoolManager public immutable poolManager;
-    address public immutable permit2;
-    IERC20 public immutable usdt;
+`PythiaPeriphery.t.sol` creates markets until it has one of each clone-ordering direction. This directly covers the Phase 5 direction-correctness gotcha.
 
-    constructor(address _hook, address _pm, address _permit2, address _usdt) {
-        hook = PythiaHook(_hook);
-        poolManager = IPoolManager(_pm);
-        permit2 = _permit2;
-        usdt = IERC20(_usdt);
-    }
+- [x] **Step 2: Cover all four user functions**
 
-    struct SwapCallbackData {
-        uint256 marketId;
-        bool yesIsOut;     // true => buy YES, false => buy NO
-        uint256 amount;    // USDT in
-        uint256 minOut;
-        address recipient;
-    }
+Tests added:
+- `test_buyYes_handles_yes_currency0`
+- `test_buyYes_handles_yes_currency1`
+- `test_buyNo_handles_yes_currency0`
+- `test_buyNo_handles_yes_currency1`
+- `test_sellYes_handles_yes_currency0`
+- `test_sellYes_handles_yes_currency1`
+- `test_sellNo_handles_yes_currency0`
+- `test_sellNo_handles_yes_currency1`
 
-    function buyYes(uint256 marketId, uint256 usdtIn, uint256 minOut) external returns (uint256 yesOut) {
-        // Pull USDT from caller (Permit2 wiring deferred for test simplicity)
-        require(usdt.transferFrom(msg.sender, address(this), usdtIn), "pull usdt");
-        usdt.approve(address(hook), usdtIn);
-
-        // hook.mintFor mints YES + NO to this Periphery
-        hook.mintFor(marketId, address(this), usdtIn);
-
-        // Execute swap NO → YES inside unlock callback
-        bytes memory data = abi.encode(SwapCallbackData({
-            marketId: marketId,
-            yesIsOut: true,
-            amount: usdtIn,
-            minOut: minOut,
-            recipient: msg.sender
-        }));
-        bytes memory result = poolManager.unlock(data);
-        yesOut = abi.decode(result, (uint256));
-        require(yesOut >= minOut, "minOut");
-    }
-
-    function unlockCallback(bytes calldata rawData) external returns (bytes memory) {
-        require(msg.sender == address(poolManager), "only PM");
-        SwapCallbackData memory d = abi.decode(rawData, (SwapCallbackData));
-
-        PoolKey memory pk = hook.poolKey(d.marketId);
-        bool yesIs0 = hook.markets(d.marketId).yesIsCurrency0;
-
-        // Determine swap direction: buy YES means we send NO and receive YES.
-        // If YES is currency0 then NO is currency1, swap currency1 → currency0 means zeroForOne = false.
-        bool zeroForOne = d.yesIsOut ? !yesIs0 : yesIs0;
-
-        // Currency to settle (the one we send IN)
-        Currency settleCurrency = zeroForOne ? pk.currency0 : pk.currency1;
-        Currency takeCurrency   = zeroForOne ? pk.currency1 : pk.currency0;
-
-        // Sync + transfer + settle
-        poolManager.sync(settleCurrency);
-        IERC20(Currency.unwrap(settleCurrency)).transfer(address(poolManager), d.amount);
-        poolManager.settle();
-
-        // Execute swap
-        BalanceDelta delta = poolManager.swap(
-            pk,
-            IPoolManager.SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -int256(d.amount), // exact in
-                sqrtPriceLimitX96: zeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341
-            }),
-            ""
-        );
-
-        // Take outcome to recipient
-        int128 takeAmount = zeroForOne ? delta.amount1() : delta.amount0();
-        require(takeAmount > 0, "no out");
-        uint256 outAmt = uint256(uint128(takeAmount));
-        poolManager.take(takeCurrency, d.recipient, outAmt);
-
-        return abi.encode(outAmt);
-    }
-}
-```
-
-Add a public `markets()` accessor on the hook so Periphery can read `yesIsCurrency0`:
-```solidity
-// Add to PythiaHook.sol if not already public
-function markets(uint256 marketId) public view returns (MarketState memory) {
-    return markets[marketId];
-}
-```
-
-Note: `markets` is already a public mapping → auto-getter exists, but it returns tuples without struct names. For clarity, expose `marketsFull` or restructure.
-
-- [ ] **Step 4: Run; iterate**
+- [x] **Step 3: Run focused tests**
 
 ```bash
 forge test --match-path test/PythiaPeriphery.t.sol -vv
 ```
 
-V4 swap API signatures vary across versions — this step will likely need iteration to match the installed `lib/v4-core` API. Inspect `lib/v4-core/contracts/PoolManager.sol` if `BalanceDelta`, `amount0()`, or `sqrtPriceLimitX96` constants differ.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add contracts/src/PythiaPeriphery.sol contracts/test/PythiaPeriphery.t.sol
-git commit -m "feat(periphery): one-tx atomic buyYes via unlock callback + mintFor"
-```
-
-### Task 5.2: Periphery — `buyNo`, `sellYes`, `sellNo` (symmetric)
-
-- [ ] **Step 1: Implement the three symmetric functions in `PythiaPeriphery.sol`**
-
-```solidity
-function buyNo(uint256 marketId, uint256 usdtIn, uint256 minOut) external returns (uint256 noOut) {
-    require(usdt.transferFrom(msg.sender, address(this), usdtIn), "pull usdt");
-    usdt.approve(address(hook), usdtIn);
-    hook.mintFor(marketId, address(this), usdtIn);
-    bytes memory data = abi.encode(SwapCallbackData({
-        marketId: marketId, yesIsOut: false, amount: usdtIn, minOut: minOut, recipient: msg.sender
-    }));
-    bytes memory result = poolManager.unlock(data);
-    noOut = abi.decode(result, (uint256));
-    require(noOut >= minOut, "minOut");
-}
-
-function sellYes(uint256 marketId, uint256 yesIn, uint256 minUsdtOut) external returns (uint256 usdtOut) {
-    // 1. Pull YES from caller
-    OutcomeToken yesT = OutcomeToken(hook.marketView(marketId).yesToken);
-    yesT.transferFrom(msg.sender, address(this), yesIn);
-    // 2. Swap YES → NO inside unlock
-    // ... (symmetric implementation)
-    // 3. Now Periphery holds matched YES+NO; burn via hook for USDT
-    // (Full implementation follows the same pattern; left as exercise for executor agent.)
-    revert("Task 5.2 — implement sellYes");
-}
-
-// sellNo symmetric
-```
-
-- [ ] **Step 2: Add tests for buyNo and sellYes**
-
-(Tests follow the same template as buyYes — write them as part of the implementation step.)
-
-- [ ] **Step 3: Run tests; commit**
-
-```bash
-forge test --match-path test/PythiaPeriphery.t.sol -vv
-git add contracts/src/PythiaPeriphery.sol contracts/test/PythiaPeriphery.t.sol
-git commit -m "feat(periphery): symmetric buyNo / sellYes / sellNo"
-```
+Result: 8 passed.
 
 ---
 
@@ -2790,7 +2641,7 @@ git commit -m "test: complete contract test suite passes with gas report"
 
 **2. Placeholder scan**
 
-- Task 5.2 `sellYes` says "implement sellYes" without complete code — **needs fix** to provide the symmetric implementation in full. Marking as a known gap; executor will need to fill the `// ...` in.
+- Task 5.2 `buyNo` / `sellYes` / `sellNo` implemented and covered for both YES currency orderings ✓
 - Task 6.1 invariant says "for simplicity assert YES==NO" rather than the full vault.USDT check — this is a deliberate simplification noted in the test comment.
 
 **3. Type consistency**
