@@ -51,6 +51,7 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     error MarketNotResolved();
     error InvalidChoice();
     error InvalidUnlockOp();
+    error CreatorOnlyLpWindow();
 
     enum MarketStatus {
         TRADING,
@@ -99,6 +100,7 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     mapping(bytes32 => bool) public allowedTools;
     mapping(uint256 => MarketState) public markets;
     mapping(uint256 => uint256) public bond;
+    mapping(uint256 => uint64) public _creatorLpWindowEnd;
     uint256[] private _marketIds;
     uint256 private _nextMarketId = 1;
 
@@ -183,6 +185,7 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         marketId = _nextMarketId++;
         _marketIds.push(marketId);
         bond[marketId] = CREATOR_BOND;
+        _creatorLpWindowEnd[marketId] = uint64(block.number) + 60;
 
         (address yesT, address noT) = _cloneOutcomeTokens(marketId, initialUsdtLiquidity);
         PoolKey memory pk = _poolKeyFor(yesT, noT);
@@ -364,11 +367,19 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         revert();
     }
 
-    function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
+    function beforeAddLiquidity(address sender, PoolKey calldata key, ModifyLiquidityParams calldata, bytes calldata)
         external
-        pure
+        view
         returns (bytes4)
     {
+        uint256 marketId = _marketIdFromPoolKey(key);
+        if (effectiveStatus(marketId) != ExtendedStatus.TRADING) revert MarketNotTrading();
+        if (
+            sender != address(this) && block.number < _creatorLpWindowEnd[marketId]
+                && sender != markets[marketId].creator
+        ) {
+            revert CreatorOnlyLpWindow();
+        }
         return IHooks.beforeAddLiquidity.selector;
     }
 
@@ -402,11 +413,13 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         revert();
     }
 
-    function beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+    function beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         external
-        pure
+        view
         returns (bytes4, BeforeSwapDelta, uint24)
     {
+        uint256 marketId = _marketIdFromPoolKey(key);
+        if (effectiveStatus(marketId) != ExtendedStatus.TRADING) revert MarketNotTrading();
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
@@ -483,6 +496,16 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
             tickSpacing: TICK_SPACING,
             hooks: IHooks(address(this))
         });
+    }
+
+    function _marketIdFromPoolKey(PoolKey memory key) internal view returns (uint256) {
+        bytes32 targetId = PoolId.unwrap(key.toId());
+        for (uint256 i = 0; i < _marketIds.length; i++) {
+            uint256 marketId = _marketIds[i];
+            PoolKey memory storedKey = markets[marketId].poolKey;
+            if (PoolId.unwrap(storedKey.toId()) == targetId) return marketId;
+        }
+        revert InvalidMarket();
     }
 
     function _storeMarket(

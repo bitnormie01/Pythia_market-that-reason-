@@ -1971,11 +1971,15 @@ function beforeSwap(address, PoolKey calldata key, IPoolManager.SwapParams calld
     return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
 }
 
-function beforeAddLiquidity(address, PoolKey calldata key, IPoolManager.ModifyLiquidityParams calldata, bytes calldata)
+function beforeAddLiquidity(address sender, PoolKey calldata key, IPoolManager.ModifyLiquidityParams calldata, bytes calldata)
     external view override returns (bytes4)
 {
     uint256 marketId = _marketIdFromPoolKey(key);
     if (effectiveStatus(marketId) != ExtendedStatus.TRADING) revert MarketNotTrading();
+    // sender == address(this) is allowed so createMarket's hook-owned seed add succeeds.
+    if (sender != address(this) && block.number < _creatorLpWindowEnd[marketId] && sender != markets[marketId].creator) {
+        revert CreatorOnlyLpWindow();
+    }
     return IHooks.beforeAddLiquidity.selector;
 }
 
@@ -1991,6 +1995,8 @@ function _marketIdFromPoolKey(PoolKey calldata key) internal view returns (uint2
 ```
 
 Replace the existing reverting stubs for `beforeSwap` and `beforeAddLiquidity` in the IHooks block.
+
+Implementation note: add `mapping(uint256 => uint64) public _creatorLpWindowEnd`, set it to `uint64(block.number) + 60` in `createMarket`, and use the V4 callback's first `address sender` parameter for the creator-window check. Do not use `msg.sender`; inside hook callbacks it is the PoolManager.
 
 - [ ] **Step 4: Run; expect pass**
 

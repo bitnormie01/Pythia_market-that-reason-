@@ -8,7 +8,7 @@ import {PoolKey} from "@uniswap/v4-core/contracts/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/contracts/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/contracts/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/contracts/types/BalanceDelta.sol";
-import {SwapParams} from "@uniswap/v4-core/contracts/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/contracts/types/PoolOperation.sol";
 import {StateLibrary} from "@uniswap/v4-core/contracts/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/contracts/libraries/TransientStateLibrary.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -20,10 +20,19 @@ contract PythiaHookTest is PythiaFixture {
     using StateLibrary for PoolManager;
     using TransientStateLibrary for PoolManager;
 
+    uint8 private constant TEST_OP_SWAP = 1;
+    uint8 private constant TEST_OP_ADD_LIQUIDITY = 2;
+
     struct SwapCallbackData {
         address sender;
         PoolKey key;
         SwapParams params;
+    }
+
+    struct ModifyLiquidityCallbackData {
+        address sender;
+        PoolKey key;
+        ModifyLiquidityParams params;
     }
 
     function test_scaffold_constants() public view {
@@ -134,6 +143,15 @@ contract PythiaHookTest is PythiaFixture {
         PoolId pid = key.toId();
         uint128 liq = StateLibrary.getLiquidity(poolManager, pid);
         assertGt(liq, 0, "pool should have liquidity after seed");
+    }
+
+    function test_seed_succeeds_inside_creator_lp_window() public {
+        uint256 startBlock = block.number;
+        (uint256 marketId,,) = _createDefaultMarket();
+
+        assertEq(hook._creatorLpWindowEnd(marketId), startBlock + 60);
+        PoolKey memory key = hook.poolKey(marketId);
+        assertGt(StateLibrary.getLiquidity(poolManager, key.toId()), 0, "seed should bypass creator-only window");
     }
 
     function test_mint_pulls_usdt_and_issues_matched_pair() public {
@@ -286,6 +304,63 @@ contract PythiaHookTest is PythiaFixture {
         assertEq(uint8(hook.effectiveStatus(marketId)), uint8(PythiaHook.ExtendedStatus.EXPIRED));
     }
 
+    function test_beforeSwap_reverts_post_expiry() public {
+        (uint256 marketId,, address noT) = _createDefaultMarket();
+        _mintToBob(marketId, 10e6);
+        PoolKey memory key = hook.poolKey(marketId);
+        bool noForYes = Currency.unwrap(key.currency0) == noT;
+
+        vm.warp(block.timestamp + 1 days + hook.RESOLUTION_GRACE() + 1);
+
+        vm.prank(bob);
+        OutcomeToken(noT).approve(address(this), 1e6);
+        vm.expectRevert();
+        _swapExactInput(bob, key, noForYes, 1e6);
+    }
+
+    function test_beforeAddLiquidity_reverts_post_expiry() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        PoolKey memory key = hook.poolKey(marketId);
+        _mintToThis(marketId, 20e6);
+
+        vm.warp(block.timestamp + 1 days + hook.RESOLUTION_GRACE() + 1);
+
+        vm.expectRevert();
+        _addLiquidity(address(this), key, 1e6, bytes32(uint256(1001)));
+    }
+
+    function test_beforeAddLiquidity_blocks_non_creator_during_window() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        PoolKey memory key = hook.poolKey(marketId);
+        _mintToThis(marketId, 20e6);
+
+        vm.expectRevert();
+        _addLiquidity(address(this), key, 1e6, bytes32(uint256(1002)));
+    }
+
+    function test_beforeAddLiquidity_allows_creator_during_window() public {
+        (uint256 marketId,,) = _createMarketFromThis();
+        PoolKey memory key = hook.poolKey(marketId);
+        _mintToThis(marketId, 20e6);
+        uint128 beforeLiq = StateLibrary.getLiquidity(poolManager, key.toId());
+
+        _addLiquidity(address(this), key, 1e6, bytes32(uint256(1003)));
+
+        assertGt(StateLibrary.getLiquidity(poolManager, key.toId()), beforeLiq);
+    }
+
+    function test_beforeAddLiquidity_allows_anyone_after_window() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        PoolKey memory key = hook.poolKey(marketId);
+        _mintToThis(marketId, 20e6);
+        uint128 beforeLiq = StateLibrary.getLiquidity(poolManager, key.toId());
+
+        vm.roll(block.number + 60);
+        _addLiquidity(address(this), key, 1e6, bytes32(uint256(1004)));
+
+        assertGt(StateLibrary.getLiquidity(poolManager, key.toId()), beforeLiq);
+    }
+
     function test_creator_can_withdraw_seed_after_market_resolved() public {
         (uint256 marketId,,) = _createDefaultMarket();
         _setResolved(marketId, hook.CHOICE_YES());
@@ -356,6 +431,14 @@ contract PythiaHookTest is PythiaFixture {
         (yesT, noT,,,,,) = hook.marketView(marketId);
     }
 
+    function _createMarketFromThis() internal returns (uint256 marketId, address yesT, address noT) {
+        usdt.mint(address(this), 100e6);
+        usdt.approve(address(hook), 15e6);
+        marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), _tools(), 1, 10e6);
+
+        (yesT, noT,,,,,) = hook.marketView(marketId);
+    }
+
     function _mintToBob(uint256 marketId, uint256 amount) internal {
         vm.startPrank(bob);
         usdt.approve(address(hook), amount);
@@ -363,24 +446,59 @@ contract PythiaHookTest is PythiaFixture {
         vm.stopPrank();
     }
 
+    function _mintToThis(uint256 marketId, uint256 amount) internal {
+        usdt.mint(address(this), amount);
+        usdt.approve(address(hook), amount);
+        hook.mintFor(marketId, address(this), amount);
+    }
+
     function _swapExactInput(address sender, PoolKey memory key, bool zeroForOne, uint256 amountIn) internal {
         uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
         poolManager.unlock(
             abi.encode(
-                SwapCallbackData({
-                    sender: sender,
-                    key: key,
-                    params: SwapParams({
-                        zeroForOne: zeroForOne, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: limit
+                TEST_OP_SWAP,
+                abi.encode(
+                    SwapCallbackData({
+                        sender: sender,
+                        key: key,
+                        params: SwapParams({
+                            zeroForOne: zeroForOne, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: limit
+                        })
                     })
-                })
+                )
+            )
+        );
+    }
+
+    function _addLiquidity(address sender, PoolKey memory key, uint128 liquidity, bytes32 salt) internal {
+        poolManager.unlock(
+            abi.encode(
+                TEST_OP_ADD_LIQUIDITY,
+                abi.encode(
+                    ModifyLiquidityCallbackData({
+                        sender: sender,
+                        key: key,
+                        params: ModifyLiquidityParams({
+                            tickLower: -887200,
+                            tickUpper: 887200,
+                            liquidityDelta: int256(uint256(liquidity)),
+                            salt: salt
+                        })
+                    })
+                )
             )
         );
     }
 
     function unlockCallback(bytes calldata rawData) external returns (bytes memory) {
         require(msg.sender == address(poolManager), "only PoolManager");
-        SwapCallbackData memory data = abi.decode(rawData, (SwapCallbackData));
+        (uint8 op, bytes memory data) = abi.decode(rawData, (uint8, bytes));
+        if (op == TEST_OP_SWAP) return _unlockSwap(abi.decode(data, (SwapCallbackData)));
+        if (op == TEST_OP_ADD_LIQUIDITY) return _unlockAddLiquidity(abi.decode(data, (ModifyLiquidityCallbackData)));
+        revert("bad test op");
+    }
+
+    function _unlockSwap(SwapCallbackData memory data) internal returns (bytes memory) {
         Currency input = data.params.zeroForOne ? data.key.currency0 : data.key.currency1;
         Currency output = data.params.zeroForOne ? data.key.currency1 : data.key.currency0;
         uint256 amountIn = uint256(-data.params.amountSpecified);
@@ -396,9 +514,29 @@ contract PythiaHookTest is PythiaFixture {
         return abi.encode(delta);
     }
 
+    function _unlockAddLiquidity(ModifyLiquidityCallbackData memory data) internal returns (bytes memory) {
+        (BalanceDelta delta,) = poolManager.modifyLiquidity(data.key, data.params, "");
+        _settleOrTake(data.key.currency0, delta.amount0(), data.sender);
+        _settleOrTake(data.key.currency1, delta.amount1(), data.sender);
+
+        return abi.encode(delta);
+    }
+
     function _takeCredit(Currency currency, address to) internal {
         int256 credit = poolManager.currencyDelta(address(this), currency);
         if (credit > 0) poolManager.take(currency, to, uint256(credit));
+    }
+
+    function _settleOrTake(Currency currency, int128 delta, address payer) internal {
+        if (delta < 0) {
+            uint256 amount = uint256(uint128(-delta));
+            poolManager.sync(currency);
+            if (payer == address(this)) IERC20(Currency.unwrap(currency)).transfer(address(poolManager), amount);
+            else IERC20(Currency.unwrap(currency)).transferFrom(payer, address(poolManager), amount);
+            poolManager.settle();
+        } else if (delta > 0) {
+            poolManager.take(currency, payer, uint256(uint128(delta)));
+        }
     }
 
     function _setResolved(uint256 marketId, uint8 choice) internal {
