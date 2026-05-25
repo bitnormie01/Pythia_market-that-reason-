@@ -2,7 +2,11 @@
 
 Off-chain worker that resolves Pythia prediction-market `reason()` requests on X Layer.
 
-**Pipeline:** `FlapAIProviderRequestMade` event → Anthropic Claude (with tool calls) → IPFS pin → `fulfillReasoning(requestId, choice, cid)`.
+**Pipeline:** `FlapAIProviderRequestMade` event → Anthropic Claude Sonnet (with tool calls) → Pinata IPFS pin → `fulfillReasoning(requestId, choice, cid)`.
+
+## Demo Model Support
+
+The on-chain provider registry keeps the Flap-compatible model IDs, but this hackathon fulfiller intentionally services only `modelId=1` (`anthropic/claude-sonnet-4.6`). The Anthropic API call is pinned to `claude-sonnet-4-20250514`. Seed scripts and the frontend create-market form must use model #1; requests for model IDs `0`, `2`, or `3` are rejected by the worker.
 
 ## Quick start
 
@@ -25,7 +29,7 @@ npm run start
 | `runner.ts` | Anthropic SDK tool-call loop (max 5 iterations, fallback `choice=2 INVALID`) |
 | `tools/aveToken.ts` | `ave_token_tool`: fetches live token metrics from ave.ai |
 | `tools/onchainRead.ts` | `onchain_read_tool`: `parseAbi` + `readContract` on X Layer |
-| `pin.ts` | Dual IPFS pin (Pinata + web3.storage) via `Promise.allSettled` |
+| `pin.ts` | Pinata IPFS pin plus public gateway URLs |
 | `submit.ts` | viem `walletClient` → `fulfillReasoning` / `refundRequest` + receipt check |
 | `processor.ts` | event → run → pin → submit; refund-on-failure; startup replay |
 | `index.ts` | wires the loop, optional Better Stack heartbeat, graceful shutdown |
@@ -63,7 +67,7 @@ npm run start
 
 5. **Inspect the trail**
 
-   The fulfilled row in `pythia-fulfiller.sqlite` carries the CID. Fetch the trail JSON from any of: `gateway.pinata.cloud/ipfs/<cid>`, `w3s.link/ipfs/<cid>`, `cloudflare-ipfs.com/ipfs/<cid>`.
+   The fulfilled row in `pythia-fulfiller.sqlite` carries the CID. Fetch the trail JSON from either `gateway.pinata.cloud/ipfs/<cid>` or `cloudflare-ipfs.com/ipfs/<cid>`.
 
 ## Crash recovery
 
@@ -73,10 +77,10 @@ On restart, `replayPending` walks `requests WHERE status='pending'`:
 
 ## Security deferrals (hackathon scope)
 
-`npm install` reports vulnerabilities in `@pinata/sdk@2.1.0` and `web3.storage@4.5.5` transitive dependencies. These were knowingly accepted by the mastermind:
+`npm install` reports vulnerabilities in `@pinata/sdk@2.1.0` transitive dependencies. These were knowingly accepted by the mastermind:
 
 - The fulfiller is a server-side daemon making outbound calls to known IPFS endpoints.
-- Attack vector is "Pinata/web3.storage themselves compromised" — low risk for a week-long demo.
+- Attack vector is "Pinata itself compromised" — low risk for a week-long demo.
 - Replacements would push the milestone into the deploy window.
 
 Track upstream patches; revisit before mainnet promotion.

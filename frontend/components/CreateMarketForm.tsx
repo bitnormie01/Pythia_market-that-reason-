@@ -15,6 +15,7 @@ import { ADDRESSES, USDT_DECIMALS } from "@/lib/contracts";
 
 const TOOL_HASHES = [keccak256(toBytes("ave_token_tool")), keccak256(toBytes("onchain_read_tool"))] as const;
 const QUESTION_FORBIDDEN = /[<>[\]{}]/; // basic prompt-injection guard, matches on-chain Hook check
+const SUPPORTED_MODEL_ID = 1;
 
 export default function CreateMarketForm() {
   const { address } = useAccount();
@@ -99,6 +100,10 @@ export default function CreateMarketForm() {
       toast.error("Initial USDT liquidity required");
       return;
     }
+    if (modelId !== SUPPORTED_MODEL_ID) {
+      toast.error("Only model #1 is enabled for the hackathon fulfiller");
+      return;
+    }
     writeContract(
       {
         address: ADDRESSES.hook,
@@ -146,7 +151,6 @@ export default function CreateMarketForm() {
           className="w-full bg-zinc-900 rounded p-3 mt-1"
         >
           <option value={1}>Claude Sonnet 4.6 (model #1)</option>
-          <option value={2}>Claude Haiku 4.5 (model #2)</option>
         </select>
       </div>
       <div>

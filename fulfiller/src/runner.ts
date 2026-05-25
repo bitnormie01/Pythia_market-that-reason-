@@ -33,9 +33,10 @@ export type RunnerDeps = {
   ) => Promise<{ result: unknown; rawResponseSha256: string }>;
 };
 
-const MODEL_NAMES: Record<number, string> = {
-  1: "claude-sonnet-4-6",
-  2: "claude-haiku-4-5"
+export const SUPPORTED_MODEL_ID = 1;
+
+export const MODEL_NAMES: Record<number, string> = {
+  [SUPPORTED_MODEL_ID]: "claude-sonnet-4-20250514"
 };
 
 const CHOICE_LABELS = ["YES", "NO", "INVALID"] as const;
@@ -58,7 +59,9 @@ export async function runWithTools(
   deps: RunnerDeps = {}
 ): Promise<RunResult> {
   const modelName = MODEL_NAMES[modelId];
-  if (!modelName) throw new Error(`Unsupported model ID: ${modelId}`);
+  if (!modelName) {
+    throw new Error(`Unsupported model ID: ${modelId}. Hackathon fulfiller supports only modelId=1 (Sonnet).`);
+  }
 
   const anthropic = deps.anthropic ?? new Anthropic({ apiKey: cfg.anthropicApiKey });
   const aveTool = deps.callAveToken ?? defaultCallAveToken;

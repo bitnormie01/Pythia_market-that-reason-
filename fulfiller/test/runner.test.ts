@@ -35,7 +35,7 @@ describe("runWithTools", () => {
     });
 
     expect(result.choice).toBe(0);
-    expect(result.modelUsed).toBe("claude-sonnet-4-6");
+    expect(result.modelUsed).toBe("claude-sonnet-4-20250514");
     expect(result.steps.some((s) => s.type === "final_choice" && s.choice === 0)).toBe(true);
   });
 
@@ -110,9 +110,9 @@ describe("runWithTools", () => {
     expect(result.choice).toBe(2);
   });
 
-  it("throws on unsupported modelId", async () => {
+  it.each([0, 2, 3, 99])("throws on unsupported demo modelId %i", async (modelId) => {
     await expect(
-      runWithTools(baseCfg, 99, "Resolve?", 3, { anthropic: {} as any })
-    ).rejects.toThrow(/Unsupported model/);
+      runWithTools(baseCfg, modelId, "Resolve?", 3, { anthropic: {} as any })
+    ).rejects.toThrow(/supports only modelId=1/);
   });
 });

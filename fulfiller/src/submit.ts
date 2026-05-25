@@ -8,7 +8,7 @@ export const xLayer = defineChain({
   id: 196,
   name: "X Layer",
   nativeCurrency: { name: "OKB", symbol: "OKB", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.xlayer.tech"] } }
+  rpcUrls: { default: { http: ["https://rpc.xlayer.tech", "https://rpc.ankr.com/xlayer", "https://xlayerrpc.okx.com"] } }
 });
 
 type WalletLike = { writeContract: (args: any) => Promise<`0x${string}`> };

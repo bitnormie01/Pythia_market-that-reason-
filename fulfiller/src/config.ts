@@ -11,7 +11,6 @@ const ConfigSchema = z.object({
   AVE_AI_API_KEY: z.string().optional(),
   AVE_AI_BASE_URL: z.string().url().default("https://api.ave.ai"),
   PINATA_JWT: z.string().min(1),
-  WEB3_STORAGE_TOKEN: z.string().optional(),
   BETTERSTACK_HEARTBEAT_URL: z.string().url().optional()
 });
 
@@ -26,7 +25,6 @@ export type Config = {
   aveApiKey?: string;
   aveBaseUrl: string;
   pinataJwt: string;
-  web3StorageToken?: string;
   heartbeatUrl?: string;
 };
 
@@ -43,7 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     aveApiKey: parsed.AVE_AI_API_KEY,
     aveBaseUrl: parsed.AVE_AI_BASE_URL,
     pinataJwt: parsed.PINATA_JWT,
-    web3StorageToken: parsed.WEB3_STORAGE_TOKEN,
     heartbeatUrl: parsed.BETTERSTACK_HEARTBEAT_URL
   };
 }
