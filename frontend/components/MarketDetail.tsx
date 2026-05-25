@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useReadContract, useWatchContractEvent } from "wagmi";
 
 import ResolveButton from "@/components/ResolveButton";
+import { ShareButton, type Outcome } from "@/components/ShareButton";
 import TradePanel from "@/components/TradePanel";
 import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
@@ -144,15 +145,26 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
           </div>
         )}
 
-        {statusNum === 3 && request && (
-          <div className="border border-emerald-700 rounded p-4 bg-emerald-950/20 text-sm space-y-2">
-            <p className="font-mono">
-              <span className="text-emerald-400">RESOLVED →</span>{" "}
-              <span className="text-zinc-100">
-                {Number(winningChoice) === 0 ? "YES" : Number(winningChoice) === 1 ? "NO" : "INVALID"}
-              </span>
-            </p>
-            {request.reasoningCid && (
+        {statusNum === 3 && (
+          <div className="border border-emerald-700 rounded p-4 bg-emerald-950/20 text-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="font-mono">
+                <span className="text-emerald-400">RESOLVED →</span>{" "}
+                <span className="text-zinc-100">
+                  {Number(winningChoice) === 0 ? "YES" : Number(winningChoice) === 1 ? "NO" : "INVALID"}
+                </span>
+              </p>
+              {request?.reasoningCid && (
+                <ShareButton
+                  question={question}
+                  outcome={
+                    (Number(winningChoice) === 0 ? "YES" : Number(winningChoice) === 1 ? "NO" : "INVALID") as Outcome
+                  }
+                  proofUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/proofs/${request.reasoningCid}`}
+                />
+              )}
+            </div>
+            {request?.reasoningCid && (
               <Link
                 href={`/proofs/${request.reasoningCid}`}
                 className="text-emerald-400 hover:underline inline-block"
