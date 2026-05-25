@@ -52,6 +52,8 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     error InvalidChoice();
     error InvalidUnlockOp();
     error CreatorOnlyLpWindow();
+    error InsufficientResolutionFee(uint256 sent, uint256 required);
+    error FulfillInternalOnlySelf();
 
     enum MarketStatus {
         TRADING,
@@ -107,7 +109,7 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     mapping(uint256 => uint256) public requestIdToMarketId;
     mapping(uint256 => address) public requestIdToRequester;
     mapping(uint256 => uint256) public marketLastRequestId;
-    uint256[] public pendingRequestIds;
+    uint256[] private _pendingRequestIds;
     mapping(uint256 => uint256) private _pendingIdxPlusOne;
 
     event MarketCreated(uint256 indexed marketId, address indexed creator, string question, uint64 expiry);
@@ -117,6 +119,12 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
     event CreatorSeedWithdrawn(
         uint256 indexed marketId, address indexed creator, uint128 liquidityRemoved, uint256 collateralReturned
     );
+    event ResolutionRequested(uint256 indexed marketId, uint256 indexed requestId, address indexed requester);
+    event Resolved(uint256 indexed marketId, uint8 choice, string reasoningCid);
+    event ResolutionRefunded(
+        uint256 indexed marketId, uint256 indexed requestId, address indexed requester, uint256 amount
+    );
+    event RefundEscrowed(uint256 indexed requestId, address indexed requester, uint256 amount);
 
     constructor(address poolManager_, address usdt_, address provider_, address outcomeTokenMaster_, address admin) {
         poolManager = IPoolManager(poolManager_);
@@ -154,12 +162,33 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         return 0;
     }
 
-    function _fulfillReasoning(uint256, uint8) internal override {
-        // Implemented in Task 4.7.
+    function _fulfillReasoning(uint256 requestId, uint8 choice) internal override {
+        try this.fulfillInternal(requestId, choice) {} catch {}
     }
 
-    function _onFlapAIRequestRefunded(uint256) internal override {
-        // Implemented in Task 4.7.
+    function _onFlapAIRequestRefunded(uint256 requestId) internal override {
+        uint256 marketId = requestIdToMarketId[requestId];
+        if (marketId == 0) return;
+
+        MarketState storage m = markets[marketId];
+        if (m.status != MarketStatus.RESOLVING) return;
+
+        address requester = requestIdToRequester[requestId];
+        delete requestIdToMarketId[requestId];
+        delete requestIdToRequester[requestId];
+        delete marketLastRequestId[marketId];
+        _popPending(requestId);
+        m.status = MarketStatus.TRADING;
+
+        if (msg.value > 0) {
+            (bool ok,) = requester.call{value: msg.value, gas: 100_000}("");
+            if (!ok) {
+                emit RefundEscrowed(requestId, requester, msg.value);
+                return;
+            }
+        }
+
+        emit ResolutionRefunded(marketId, requestId, requester, msg.value);
     }
 
     function createMarket(
@@ -249,6 +278,74 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
                 abi.encode(WithdrawSeedData({marketId: marketId, to: msg.sender, liquidityToRemove: liquidityToRemove}))
             )
         );
+    }
+
+    function requestResolution(uint256 marketId) external payable returns (uint256 requestId) {
+        MarketState storage m = markets[marketId];
+        if (m.creator == address(0)) revert InvalidMarket();
+        if (effectiveStatus(marketId) != ExtendedStatus.EXPIRED) revert NotYetExpired();
+
+        IFlapAIProvider.Model memory model = IFlapAIProvider(provider).getModel(m.modelId);
+        uint256 price = model.price;
+        if (msg.value < price) revert InsufficientResolutionFee(msg.value, price);
+
+        string memory prompt = string(
+            abi.encodePacked(
+                "Resolve this prediction market. Respond with only 0 for YES, 1 for NO, or 2 for INVALID.\nQuestion: ",
+                m.question
+            )
+        );
+
+        requestId = IFlapAIProvider(provider).reason{value: price}(m.modelId, prompt, NUM_OF_CHOICES);
+        requestIdToMarketId[requestId] = marketId;
+        requestIdToRequester[requestId] = msg.sender;
+        marketLastRequestId[marketId] = requestId;
+        _pushPending(requestId);
+        m.status = MarketStatus.RESOLVING;
+
+        uint256 excess = msg.value - price;
+        if (excess > 0) {
+            (bool ok,) = msg.sender.call{value: excess, gas: 100_000}("");
+            require(ok, "refund excess failed");
+        }
+
+        emit ResolutionRequested(marketId, requestId, msg.sender);
+    }
+
+    function fulfillInternal(uint256 requestId, uint8 choice) external {
+        if (msg.sender != address(this)) revert FulfillInternalOnlySelf();
+        if (choice >= NUM_OF_CHOICES) revert InvalidChoice();
+
+        uint256 marketId = requestIdToMarketId[requestId];
+        if (marketId == 0) revert InvalidMarket();
+
+        MarketState storage m = markets[marketId];
+        if (m.status != MarketStatus.RESOLVING) return;
+
+        m.winningChoice = choice;
+        m.status = MarketStatus.RESOLVED;
+        string memory cid = IFlapAIProvider(provider).getRequest(requestId).reasoningCid;
+
+        delete requestIdToMarketId[requestId];
+        delete requestIdToRequester[requestId];
+        _popPending(requestId);
+
+        emit Resolved(marketId, choice, cid);
+    }
+
+    function pendingRequestIds() external view returns (uint256[] memory ids) {
+        return _pendingRequestIds;
+    }
+
+    function pendingRequestCount() external view returns (uint256) {
+        return _pendingRequestIds.length;
+    }
+
+    function sweepOkb(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(to != address(0), "zero receiver");
+        uint256 bal = address(this).balance;
+        (bool ok,) = to.call{value: bal}("");
+        require(ok, "sweep okb failed");
     }
 
     function effectiveStatus(uint256 marketId) public view returns (ExtendedStatus) {
@@ -567,6 +664,28 @@ contract PythiaHook is IHooks, IUnlockCallback, FlapAIConsumerBase, AccessContro
         } else {
             require(usdt.transfer(m.creator, bondAmt), "bond return failed");
         }
+    }
+
+    function _pushPending(uint256 requestId) internal {
+        if (_pendingIdxPlusOne[requestId] != 0) return;
+        _pendingRequestIds.push(requestId);
+        _pendingIdxPlusOne[requestId] = _pendingRequestIds.length;
+    }
+
+    function _popPending(uint256 requestId) internal {
+        uint256 idxPlusOne = _pendingIdxPlusOne[requestId];
+        if (idxPlusOne == 0) return;
+
+        uint256 idx = idxPlusOne - 1;
+        uint256 last = _pendingRequestIds.length - 1;
+        if (idx != last) {
+            uint256 lastId = _pendingRequestIds[last];
+            _pendingRequestIds[idx] = lastId;
+            _pendingIdxPlusOne[lastId] = idx + 1;
+        }
+
+        _pendingRequestIds.pop();
+        delete _pendingIdxPlusOne[requestId];
     }
 
     function _toString(uint256 v) internal pure returns (string memory) {

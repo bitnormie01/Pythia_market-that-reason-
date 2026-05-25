@@ -1461,13 +1461,14 @@ struct MarketState {
 mapping(bytes32 => bool) public allowedTools;
 mapping(uint256 => MarketState) public markets;
 mapping(uint256 => uint256) public bond;
+mapping(uint256 => uint64) public _creatorLpWindowEnd;
 uint256[] private _marketIds;
 uint256 private _nextMarketId = 1;
 
 mapping(uint256 => uint256) public requestIdToMarketId;
 mapping(uint256 => address) public requestIdToRequester;
 mapping(uint256 => uint256) public marketLastRequestId;
-uint256[] public pendingRequestIds;
+uint256[] private _pendingRequestIds;
 mapping(uint256 => uint256) private _pendingIdxPlusOne; // for swap-and-pop
 
 // ----------------------------------------------------------------
@@ -2082,7 +2083,7 @@ function requestResolution(uint256 marketId) external payable {
 
     // Read live price from provider; require msg.value >= price; refund excess
     uint256 price = IFlapAIProvider(provider).getModel(m.modelId).price;
-    require(msg.value >= price, "insufficient OKB");
+    if (msg.value < price) revert InsufficientResolutionFee(msg.value, price);
 
     string memory prompt = _buildPrompt(marketId);
     uint256 reqId = IFlapAIProvider(provider).reason{value: price}(m.modelId, prompt, NUM_OF_CHOICES);
@@ -2140,6 +2141,7 @@ function fulfillInternal(uint256 requestId, uint8 choice) external {
 
 function _onFlapAIRequestRefunded(uint256 requestId) internal override {
     uint256 marketId = requestIdToMarketId[requestId];
+    if (marketId == 0) return;
     MarketState storage m = markets[marketId];
     if (m.status != MarketStatus.RESOLVING) return;
 
@@ -2156,33 +2158,39 @@ function _onFlapAIRequestRefunded(uint256 requestId) internal override {
     if (msg.value > 0) {
         (bool ok,) = originalRequester.call{value: msg.value, gas: 100_000}("");
         if (!ok) {
-            // Escrow to admin if smart-wallet refused
+            // Keep OKB in the hook; admin can recover with sweepOkb().
             emit RefundEscrowed(requestId, originalRequester, msg.value);
         }
     }
 }
 
 function _pushPending(uint256 reqId) internal {
-    pendingRequestIds.push(reqId);
-    _pendingIdxPlusOne[reqId] = pendingRequestIds.length; // index + 1
+    _pendingRequestIds.push(reqId);
+    _pendingIdxPlusOne[reqId] = _pendingRequestIds.length; // index + 1
 }
+
+function pendingRequestIds() external view returns (uint256[] memory) {
+    return _pendingRequestIds;
+}
+
+function pendingRequestCount() external view returns (uint256) {
+    return _pendingRequestIds.length;
+}
+
+function sweepOkb(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE);
 
 function _popPending(uint256 reqId) internal {
     uint256 idxPlus1 = _pendingIdxPlusOne[reqId];
     if (idxPlus1 == 0) return;
     uint256 idx = idxPlus1 - 1;
-    uint256 last = pendingRequestIds.length - 1;
+    uint256 last = _pendingRequestIds.length - 1;
     if (idx != last) {
-        uint256 lastId = pendingRequestIds[last];
-        pendingRequestIds[idx] = lastId;
+        uint256 lastId = _pendingRequestIds[last];
+        _pendingRequestIds[idx] = lastId;
         _pendingIdxPlusOne[lastId] = idx + 1;
     }
-    pendingRequestIds.pop();
+    _pendingRequestIds.pop();
     delete _pendingIdxPlusOne[reqId];
-}
-
-function pendingRequestCount() external view returns (uint256) {
-    return pendingRequestIds.length;
 }
 
 event ResolutionRequested(uint256 indexed marketId, uint256 indexed requestId, address indexed requester);
