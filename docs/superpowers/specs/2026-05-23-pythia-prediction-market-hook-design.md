@@ -187,8 +187,8 @@ You are an impartial market resolver on X Layer.
 
 <question>{user-supplied question, stripped of control chars}</question>
 
-Market expired at: {expiry ISO}
-Current time:     {now ISO}
+Market expired at: {expiry unix timestamp, rendered as ISO by off-chain clients}
+Current time:     {now unix timestamp, rendered as ISO by off-chain clients}
 
 Tools available:
 {tool descriptions}
@@ -207,6 +207,8 @@ Process:
 
 Respond with only the number.
 ```
+
+MVP implementation note: the on-chain hook uses a compact version of this template to save gas while preserving the core prompt-injection guard: XML-delimited `<question>` content, an explicit instruction to ignore commands inside the question, exact numeric choices, and expiry/current unix timestamps. The fulfiller backend can wrap that prompt with richer tool descriptions before calling the model.
 
 ### 3.5 Edge cases handled
 

@@ -39,6 +39,7 @@ contract PythiaHookTest is PythiaFixture {
     event ResolutionRequested(uint256 indexed marketId, uint256 indexed requestId, address indexed requester);
     event Resolved(uint256 indexed marketId, uint8 choice, string reasoningCid);
     event RefundEscrowed(uint256 indexed requestId, address indexed requester, uint256 amount);
+    event ForceResolved(uint256 indexed marketId, uint8 choice, address indexed admin);
 
     function test_scaffold_constants() public view {
         assertEq(hook.POOL_FEE(), 10_000);
@@ -516,6 +517,98 @@ contract PythiaHookTest is PythiaFixture {
         assertEq(address(hook).balance, 0);
     }
 
+    function test_forceResolve_after_7_days_in_RESOLVING() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        uint256 requestId = _requestResolutionFrom(bob, marketId, _modelPrice());
+        uint8 choice = hook.CHOICE_NO();
+
+        vm.warp(block.timestamp + hook.FORCE_RESOLVE_DELAY() + 1);
+
+        vm.expectEmit(true, false, true, true, address(hook));
+        emit ForceResolved(marketId, choice, admin);
+        vm.prank(admin);
+        hook.forceResolve(marketId, choice);
+
+        (,,,, PythiaHook.MarketStatus status,,) = hook.marketView(marketId);
+        assertEq(uint8(status), uint8(PythiaHook.MarketStatus.RESOLVED));
+        assertEq(hook.requestIdToMarketId(requestId), 0);
+        assertEq(hook.requestIdToRequester(requestId), address(0));
+        assertEq(hook.marketLastRequestId(marketId), requestId);
+        assertEq(hook.pendingRequestCount(), 0);
+    }
+
+    function test_forceResolve_when_provider_reports_UNDELIVERED() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        uint256 requestId = _requestResolutionFrom(bob, marketId, _modelPrice());
+        uint8 choice = hook.CHOICE_INVALID();
+        _setProviderRequestStatus(requestId, IFlapAIProvider.RequestStatus.UNDELIVERED);
+
+        vm.prank(admin);
+        hook.forceResolve(marketId, choice);
+
+        (,,,, PythiaHook.MarketStatus status,,) = hook.marketView(marketId);
+        assertEq(uint8(status), uint8(PythiaHook.MarketStatus.RESOLVED));
+        assertEq(hook.requestIdToMarketId(requestId), 0);
+        assertEq(hook.requestIdToRequester(requestId), address(0));
+        assertEq(hook.marketLastRequestId(marketId), requestId);
+        assertEq(hook.pendingRequestCount(), 0);
+    }
+
+    function test_forceResolve_reverts_before_conditions_met() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        _requestResolutionFrom(bob, marketId, _modelPrice());
+        uint8 choice = hook.CHOICE_YES();
+
+        vm.expectRevert(PythiaHook.ForceResolveUnavailable.selector);
+        vm.prank(admin);
+        hook.forceResolve(marketId, choice);
+    }
+
+    function test_forceResolve_admin_only() public {
+        (uint256 marketId,,) = _createDefaultMarket();
+        _requestResolutionFrom(bob, marketId, _modelPrice());
+        uint8 choice = hook.CHOICE_YES();
+        vm.warp(block.timestamp + hook.FORCE_RESOLVE_DELAY() + 1);
+
+        vm.expectRevert();
+        vm.prank(bob);
+        hook.forceResolve(marketId, choice);
+    }
+
+    function test_getMarkets_returns_newest_first() public {
+        (uint256 first,,) = _createDefaultMarket();
+        (uint256 second,,) = _createDefaultMarket();
+        (uint256 third,,) = _createDefaultMarket();
+
+        uint256[] memory ids = hook.getMarkets(0, 3);
+
+        assertEq(ids.length, 3);
+        assertEq(ids[0], third);
+        assertEq(ids[1], second);
+        assertEq(ids[2], first);
+    }
+
+    function test_getMarkets_handles_offset_and_limit_clamping() public {
+        (uint256 first,,) = _createDefaultMarket();
+        (uint256 second,,) = _createDefaultMarket();
+        _createDefaultMarket();
+
+        uint256[] memory one = hook.getMarkets(1, 1);
+        assertEq(one.length, 1);
+        assertEq(one[0], second);
+
+        uint256[] memory clamped = hook.getMarkets(1, 5);
+        assertEq(clamped.length, 2);
+        assertEq(clamped[0], second);
+        assertEq(clamped[1], first);
+
+        uint256[] memory emptyPastEnd = hook.getMarkets(3, 2);
+        assertEq(emptyPastEnd.length, 0);
+
+        uint256[] memory emptyLimit = hook.getMarkets(0, 0);
+        assertEq(emptyLimit.length, 0);
+    }
+
     function test_creator_can_withdraw_seed_after_market_resolved() public {
         (uint256 marketId,,) = _createDefaultMarket();
         _setResolved(marketId, hook.CHOICE_YES());
@@ -725,6 +818,14 @@ contract PythiaHookTest is PythiaFixture {
         uint256 packedChoice = uint256(vm.load(address(hook), choiceSlot));
         packedChoice = (packedChoice & ~(uint256(0xff) << 160)) | (uint256(choice) << 160);
         vm.store(address(hook), choiceSlot, bytes32(packedChoice));
+    }
+
+    function _setProviderRequestStatus(uint256 requestId, IFlapAIProvider.RequestStatus status) internal {
+        bytes32 base = keccak256(abi.encode(requestId, uint256(2)));
+        bytes32 statusSlot = bytes32(uint256(base) + 1);
+        uint256 packed = uint256(vm.load(address(provider), statusSlot));
+        packed = (packed & ~(uint256(0xff) << 128)) | (uint256(uint8(status)) << 128);
+        vm.store(address(provider), statusSlot, bytes32(packed));
     }
 
     function _tools() internal pure returns (bytes32[] memory tools) {
