@@ -364,6 +364,16 @@ cast call $USDT_ADDRESS "balanceOf(address)(uint256)" $(cast wallet address $DEP
 
 Expected: ≥2 OKB deployer, ≥75 USDT deployer.
 
+- [ ] **Step 1a: Confirm Foundry X Layer broadcast config**
+
+Foundry 1.4.4 fails `forge script --broadcast` on chain 196 if the custom OKLink explorer config includes `chain = 196`; it resolves that numeric chain through Foundry's built-in explorer registry and exits with `Chain 196 not supported`. Keep the custom explorer entry URL/key-only, and pass chain/verifier details explicitly in the verification step.
+
+```toml
+# contracts/foundry.toml
+[etherscan]
+xlayer = { key = "${OKLINK_API_KEY}", url = "https://www.oklink.com/api/v5/explorer/contract/verify-source-code" }
+```
+
 - [ ] **Step 2: Deploy provider**
 
 ```bash

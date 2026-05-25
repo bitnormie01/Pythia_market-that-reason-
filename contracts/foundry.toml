@@ -23,4 +23,4 @@ xlayer = "https://rpc.xlayer.tech"
 xlayer_backup = "https://rpc.ankr.com/xlayer"
 
 [etherscan]
-xlayer = { key = "${OKLINK_API_KEY}", url = "https://www.oklink.com/api/v5/explorer/contract/verify-source-code", chain = 196 }
+xlayer = { key = "${OKLINK_API_KEY}", url = "https://www.oklink.com/api/v5/explorer/contract/verify-source-code" }
