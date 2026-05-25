@@ -8,6 +8,7 @@ export type RequestRow = {
   modelId: number;
   numOfChoices: number;
   promptHash: string;
+  prompt: string | null;
   status: RequestStatus;
   choice: number | null;
   cid: string | null;
@@ -22,6 +23,7 @@ type RawRequestRow = {
   model_id: number;
   num_of_choices: number;
   prompt_hash: string;
+  prompt: string | null;
   status: RequestStatus;
   choice: number | null;
   cid: string | null;
@@ -42,6 +44,7 @@ export function openDb(path: string): PythiaDb {
       model_id INTEGER NOT NULL,
       num_of_choices INTEGER NOT NULL,
       prompt_hash TEXT NOT NULL,
+      prompt TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       choice INTEGER,
       cid TEXT,
@@ -51,6 +54,11 @@ export function openDb(path: string): PythiaDb {
     );
     CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
   `);
+  // Idempotent migration for pre-existing DBs that did not have the prompt column.
+  const cols = db.prepare("PRAGMA table_info(requests)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "prompt")) {
+    db.exec("ALTER TABLE requests ADD COLUMN prompt TEXT");
+  }
   return db;
 }
 
@@ -61,15 +69,16 @@ export function recordRequest(
   modelId: number,
   numOfChoices: number,
   promptHash: string,
-  ts: number
+  ts: number,
+  prompt: string | null = null
 ): void {
   db.prepare(
     `
     INSERT OR IGNORE INTO requests
-      (request_id, consumer, model_id, num_of_choices, prompt_hash, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+      (request_id, consumer, model_id, num_of_choices, prompt_hash, prompt, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
   `
-  ).run(requestId.toString(), consumer, modelId, numOfChoices, promptHash, ts, ts);
+  ).run(requestId.toString(), consumer, modelId, numOfChoices, promptHash, prompt, ts, ts);
 }
 
 export function getRequest(db: PythiaDb, requestId: bigint): RequestRow | undefined {
@@ -121,6 +130,7 @@ function mapRow(row: RawRequestRow): RequestRow {
     modelId: row.model_id,
     numOfChoices: row.num_of_choices,
     promptHash: row.prompt_hash,
+    prompt: row.prompt ?? null,
     status: row.status,
     choice: row.choice,
     cid: row.cid,
