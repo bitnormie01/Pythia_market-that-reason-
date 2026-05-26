@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deploy all Pythia contracts to X Layer mainnet, seed 5 demo markets, source-verify on OKLink, record the 1–3 min demo video against an already-resolved hero market, and submit to the hackathon Google Form before May 28 23:59 UTC.
+**Goal:** Deploy Pythia infrastructure contracts to X Layer mainnet, source-verify on OKLink, record the 1–3 min demo video against a local Anvil fork, and submit to the hackathon Google Form before May 28 23:59 UTC. Plan A intentionally skips mainnet seed-market broadcast for the hackathon submission; users can create markets on demand through the live frontend.
 
-**Architecture:** Foundry deploy scripts execute the 8-step deployment sequence (multisig → provider → hook mining → hook → outcome master → periphery → seeded markets → verification). Pre-recorded demo eliminates AI/IPFS demo-day drama. Twitter presence baked in throughout.
+**Architecture:** Foundry deploy scripts execute the infrastructure deployment sequence (multisig → provider → hook mining → hook → outcome master → periphery → verification). `04_SeedMarkets.s.sol` remains optional for post-launch seeding only. Pre-recorded demo eliminates AI/IPFS demo-day drama. Twitter presence baked in throughout.
 
 **Tech Stack:** Foundry (forge scripts), Safe (admin multisig), OKLink (block explorer + verification), OBS / QuickTime (screen recording), CapCut / DaVinci (light editing).
 
@@ -41,15 +41,15 @@ Record the Safe address.
 | Address | Initial OKB | Purpose |
 |---|---|---|
 | Admin Safe | 1.0 OKB | Admin txs (rare) |
-| Deployer EOA (you) | 2.0 OKB | Deployment + market seeding |
+| Deployer EOA (you) | 2.0 OKB | Infrastructure deployment |
 | Fulfiller EOA (primary) | 5.0 OKB | ~500 fulfillment txs worth |
 | Fulfiller EOA (backup) | 1.0 OKB | Standby |
 
 At current ~$45 OKB ≈ $400 total. Bridge from BSC via Orbiter or OKX bridge if needed.
 
-- [ ] **Step 4: Acquire 100 USDT on X Layer for testing + market seeding**
+- [ ] **Step 4: Acquire optional USDT on X Layer only if post-launch seeding is planned**
 
-5 seeded markets × (5 bond + 10 LP) = 75 USDT minimum. Buffer to 100.
+Plan A skips mainnet seed markets for the hackathon submission. `04_SeedMarkets.s.sol` can be broadcast post-launch if creator-side capital is available; the reduced script seeds 2 markets at 5 USDT bond + 5 USDT LP each, for 20 USDT total.
 
 - [ ] **Step 5: Get OKLink API key for verification**
 
@@ -246,97 +246,28 @@ git add contracts/script/03_DeployPeriphery.s.sol
 git commit -m "feat(deploy): periphery deployment script"
 ```
 
-### Task 1.4: Seed markets script
+### Task 1.4: Seed markets script - OPTIONAL - skipped for hackathon submission
 
 **Files:**
-- Create: `contracts/script/04_SeedMarkets.s.sol`
+- Existing: `contracts/script/04_SeedMarkets.s.sol`
 
-- [ ] **Step 1: Write script that creates the 5 seeded markets from spec §6.4**
+**Status:** OPTIONAL — skipped for hackathon submission. Run only if seeding mainnet markets with creator-side capital is desired.
 
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+Plan A deploys infrastructure contracts only for the hackathon submission. The reduced seed script remains available for a post-launch operator who wants to seed the hero and backup markets with creator-side USDT capital.
 
-import "forge-std/Script.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {PythiaHook} from "../src/PythiaHook.sol";
+- [ ] **Optional Step 1: Review the reduced seed script**
 
-contract SeedMarkets is Script {
-    function run() external {
-        address hook = vm.envAddress("HOOK_ADDRESS");
-        address usdt = vm.envAddress("USDT_ADDRESS");
+Current script footprint:
+- 2 markets: hero + backup
+- 5 USDT creator bond + 5 USDT initial LP per market
+- 20 USDT total approval/spend
+- modelId `0` (`google/gemini-2.5-flash-lite`)
 
-        bytes32[] memory toolsAve = new bytes32[](1);
-        toolsAve[0] = keccak256("ave_token_tool");
-
-        bytes32[] memory toolsBoth = new bytes32[](2);
-        toolsBoth[0] = keccak256("ave_token_tool");
-        toolsBoth[1] = keccak256("onchain_read_tool");
-
-        bytes32[] memory noTools = new bytes32[](0);
-
-        vm.startBroadcast(vm.envUint("DEPLOYER_PRIVATE_KEY"));
-
-        // Approve USDT for hook (5 markets × (5 + 10) = 75 USDT)
-        IERC20(usdt).approve(hook, 75e6);
-
-        // Market 1: Hero demo market — already-expired by recording time
-        //   Set expiry to 30 minutes from broadcast time. By the time we record demo on Day 5,
-        //   this will be ~24 hours expired and resolved.
-        PythiaHook(payable(hook)).createMarket(
-            "Is OKB spot price above $40 at 2026-05-26T18:00:00Z?",
-            uint64(block.timestamp + 30 minutes),
-            toolsBoth,
-            0, // DGrid Gemini 2.5 Flash Lite
-            10e6
-        );
-
-        // Market 2: Submission-deadline market — auditable by judges
-        PythiaHook(payable(hook)).createMarket(
-            "Will OKB close above $40 at 2026-05-28 23:59 UTC?",
-            uint64(1748476740), // May 28 23:59 UTC = unix 1748476740
-            toolsAve,
-            1,
-            10e6
-        );
-
-        // Market 3: V4 TVL on X Layer
-        PythiaHook(payable(hook)).createMarket(
-            "Will V4 TVL on X Layer exceed $500K at 2026-05-27 00:00 UTC?",
-            uint64(1748304000),
-            toolsBoth,
-            1,
-            10e6
-        );
-
-        // Market 4: Social market — demonstrates INVALID path
-        PythiaHook(payable(hook)).createMarket(
-            "Will @XLayerOfficial post about hooks before 2026-05-28?",
-            uint64(1748390400),
-            noTools, // no tools → AI returns INVALID honestly
-            1,
-            10e6
-        );
-
-        // Market 5: Self-referential
-        PythiaHook(payable(hook)).createMarket(
-            "Will the @PythiaMarkets account exceed 100 followers by 2026-05-28 12:00 UTC?",
-            uint64(1748433600),
-            noTools,
-            1,
-            10e6
-        );
-
-        vm.stopBroadcast();
-    }
-}
-```
-
-- [ ] **Step 2: Commit**
+- [ ] **Optional Step 2: Broadcast only if post-launch seeding is desired**
 
 ```bash
-git add contracts/script/04_SeedMarkets.s.sol
-git commit -m "feat(deploy): script to seed 5 demo markets per spec §6.4"
+source .env.deploy
+forge script script/04_SeedMarkets.s.sol --rpc-url xlayer --broadcast --slow -vvvv
 ```
 
 ---
@@ -362,7 +293,7 @@ cast balance $FULFILLER_PRIMARY --rpc-url xlayer
 cast call $USDT_ADDRESS "balanceOf(address)(uint256)" $(cast wallet address $DEPLOYER_PRIVATE_KEY) --rpc-url xlayer
 ```
 
-Expected: ≥2 OKB deployer, ≥75 USDT deployer.
+Expected: ≥2 OKB deployer. USDT is not required for Plan A infrastructure deployment unless the optional seed script will be broadcast post-launch.
 
 - [ ] **Step 1a: Confirm Foundry X Layer broadcast config**
 
@@ -402,6 +333,8 @@ forge script script/03_DeployPeriphery.s.sol --rpc-url xlayer --broadcast --slow
 ```
 
 Record `PERIPHERY_ADDRESS`. Update `.env.deploy`.
+
+**Plan A hackathon stop point:** mainnet broadcast intentionally stops after `03_DeployPeriphery.s.sol`. Do not broadcast `04_SeedMarkets.s.sol` for the hackathon submission.
 
 - [ ] **Step 5: Update spec address book + commit**
 
@@ -466,7 +399,9 @@ git add contracts/DISCOVERY.md
 git commit -m "docs(deploy): contracts source-verified on OKLink"
 ```
 
-### Task 2.3: Seed the 5 demo markets
+### Task 2.3: Seed markets - OPTIONAL - skipped for hackathon submission
+
+**Status:** OPTIONAL — skipped for hackathon submission. Run only if seeding mainnet markets with creator-side capital is desired.
 
 - [ ] **Step 1: Run seed script**
 
@@ -475,7 +410,7 @@ source .env.deploy
 forge script script/04_SeedMarkets.s.sol --rpc-url xlayer --broadcast --slow -vvvv
 ```
 
-Expected: 5 `MarketCreated` events. Total spend: 75 USDT + ~$0.50 OKB gas.
+Expected if run post-launch: 2 `MarketCreated` events. Total spend: 20 USDT + OKB gas.
 
 - [ ] **Step 2: Verify markets on-chain**
 
@@ -483,7 +418,7 @@ Expected: 5 `MarketCreated` events. Total spend: 75 USDT + ~$0.50 OKB gas.
 cast call $HOOK_ADDRESS "getMarkets(uint256,uint256)(uint256[])" 0 50 --rpc-url xlayer
 ```
 
-Expected: array of 5 marketIds (newest first).
+Expected if run post-launch: array of 2 marketIds (newest first).
 
 - [ ] **Step 3: Trigger resolution on the hero demo market (Market 1) after its 30-min expiry**
 
@@ -618,9 +553,9 @@ Buy `pythia.markets` or similar via Vercel domains. Point at the Vercel deployme
 
 Visit live URL:
 - Connect with OKX Wallet
-- See all 5 seeded markets
-- Click hero market → see resolved status + IPFS proof viewer renders
-- Try to buy YES on a still-trading market → tx confirms
+- Confirm mainnet contract addresses are configured
+- Create a small user-funded market if operator budget allows
+- Confirm browse/detail/create routes render against X Layer mainnet
 
 - [ ] **Step 5: Commit deployment URL to README**
 
@@ -752,7 +687,7 @@ Verify: "Building @PythiaMarkets for #XLayer Hook the Future hackathon. AI-resol
 Post 1-2 per day:
 - Day 2: "Just deployed our IFlapAIProvider stub on X Layer mainnet. One-line swap to real Flap when they ship."
 - Day 3: "First on-chain AI resolution on X Layer. IPFS reasoning trail attached: <CID>"
-- Day 4: "5 demo markets live now. Try them: pythia.markets"
+- Day 4: "Pythia infrastructure is live on X Layer mainnet. Create an AI-resolved market at pythia.markets."
 
 Each tweet: tag `@XLayerOfficial @Uniswap @flapdotsh`. Include screenshot when possible.
 
@@ -847,7 +782,7 @@ Hackathon ends 23:59 UTC. Don't fix things at midnight.
 - §6.1 Foundry tests — covered by Plan 1
 - §6.2 deploy sequence (admin Safe + fulfiller EOAs + provider + hook mining + clones + periphery) — Tasks 1.1–1.3, 2.1 ✓
 - §6.3 5-day timeline — Day 4 deploy (Task 2.1), Day 5 demo (Task 4.1), Day 6 buffer (Task 6.1) ✓
-- §6.4 seeded markets — Task 1.4 (5 markets matching spec exactly) ✓
+- §6.4 seeded markets — Task 1.4 retained as optional post-launch seeding; skipped for Plan A hackathon submission ✓
 - §6.5 risk register — embedded as buffer day + dry-run + heartbeat monitoring ✓
 - §1.2 hackathon submission requirements — Task 5.2 ✓
 - Twitter presence — Task 5.1 (Day 1 launch + mid-week + announcement) ✓
