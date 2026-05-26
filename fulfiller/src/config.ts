@@ -9,7 +9,7 @@ const ConfigSchema = z.object({
   FULFILLER_BACKUP_PRIVATE_KEY: z.string().regex(/^0x[a-fA-F0-9]{64}$/).optional(),
   DGRID_API_KEY: z.string().min(1),
   DGRID_BASE_URL: z.string().url().default("https://api.dgrid.ai/v1"),
-  DGRID_MODEL: z.string().min(1).default("google/gemini-2.0-flash-lite-001"),
+  DGRID_MODEL: z.string().min(1).default("google/gemini-2.5-flash-lite"),
   AVE_AI_API_KEY: z.string().optional(),
   AVE_AI_BASE_URL: z.string().url().default("https://api.ave.ai"),
   PINATA_JWT: z.string().min(1),

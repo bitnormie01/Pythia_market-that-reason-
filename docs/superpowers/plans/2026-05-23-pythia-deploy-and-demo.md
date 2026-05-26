@@ -287,7 +287,7 @@ contract SeedMarkets is Script {
             "Is OKB spot price above $40 at 2026-05-26T18:00:00Z?",
             uint64(block.timestamp + 30 minutes),
             toolsBoth,
-            0, // DGrid Gemini 2.0 Flash Lite
+            0, // DGrid Gemini 2.5 Flash Lite
             10e6
         );
 

@@ -462,30 +462,20 @@ contract PythiaAIProviderTest is Test {
         provider = new PythiaAIProvider(admin, fulfiller, feeReceiver);
     }
 
-    function test_model_0_is_gemini_3_flash() public view {
+    function test_model_0_is_dgrid_gemini_flash_lite() public view {
         IFlapAIProvider.Model memory m = provider.getModel(0);
-        assertEq(m.name, "google/gemini-2.0-flash-lite-001");
+        assertEq(m.name, "google/gemini-2.5-flash-lite");
         assertEq(m.price, 0.005 ether);
         assertTrue(m.enabled);
     }
 
-    function test_model_1_is_claude_sonnet_46() public view {
-        IFlapAIProvider.Model memory m = provider.getModel(1);
-        assertEq(m.name, "anthropic/claude-sonnet-4.6");
-        assertEq(m.price, 0.01 ether);
-        assertTrue(m.enabled);
-    }
-
-    function test_model_2_is_deepseek_r1() public view {
-        IFlapAIProvider.Model memory m = provider.getModel(2);
-        assertEq(m.name, "deepseek/deepseek-r1");
-        assertEq(m.price, 0.03 ether);
-    }
-
-    function test_model_3_is_deepseek_v4_flash() public view {
-        IFlapAIProvider.Model memory m = provider.getModel(3);
-        assertEq(m.name, "deepseek/deepseek-v4-flash");
-        assertEq(m.price, 0.01 ether);
+    function test_model_1_2_3_are_unregistered_in_cheap_mode() public {
+        for (uint256 id = 1; id <= 3; id++) {
+            vm.expectRevert(
+                abi.encodeWithSelector(IFlapAIProvider.FlapAIProviderModelNotRegistered.selector, id)
+            );
+            provider.getModel(id);
+        }
     }
 
     function test_getModel_reverts_for_unregistered() public {
@@ -543,10 +533,7 @@ contract PythiaAIProvider is IFlapAIProvider, AccessControl {
         _grantRole(FULFILLER_ROLE, fulfiller_);
         feeReceiver = feeReceiver_;
 
-        _registerModel(0, "google/gemini-2.0-flash-lite-001",        0.005 ether);
-        _registerModel(1, "anthropic/claude-sonnet-4.6",  0.01 ether);
-        _registerModel(2, "deepseek/deepseek-r1",         0.03 ether);
-        _registerModel(3, "deepseek/deepseek-v4-flash",   0.01 ether);
+        _registerModel(0, "google/gemini-2.5-flash-lite", 0.005 ether);
     }
 
     function _registerModel(uint16 id, string memory name_, uint256 price) internal {

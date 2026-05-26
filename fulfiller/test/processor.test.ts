@@ -11,7 +11,7 @@ const cfg: Config = {
   fulfillerPrivateKey: ("0x" + "1".repeat(64)) as `0x${string}`,
   dgridApiKey: "sk-dgrid-test",
   dgridBaseUrl: "https://api.dgrid.ai/v1",
-  dgridModel: "google/gemini-2.0-flash-lite-001",
+  dgridModel: "google/gemini-2.5-flash-lite",
   aveBaseUrl: "https://api.ave.ai",
   pinataJwt: "pinata-jwt"
 };
@@ -35,7 +35,7 @@ function deps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     runWithTools: vi.fn(async () => ({
       choice: 1,
       steps: [{ type: "final_choice", choice: 1, label: "NO", rationale: "stub" }],
-      modelUsed: "google/gemini-2.0-flash-lite-001"
+      modelUsed: "google/gemini-2.5-flash-lite"
     })),
     pinTrail: vi.fn(async () => ({ cid: "bafyCID", pins: ["https://gw/bafyCID"] })),
     submitFulfillReasoning: vi.fn(async () => "0xTXFUL" as `0x${string}`),

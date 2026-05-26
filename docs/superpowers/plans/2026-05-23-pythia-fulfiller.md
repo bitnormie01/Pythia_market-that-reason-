@@ -110,7 +110,7 @@ FULFILLER_BACKUP_PRIVATE_KEY=0x... # optional, for failover
 # LLM
 DGRID_API_KEY=sk-...
 DGRID_BASE_URL=https://api.dgrid.ai/v1
-DGRID_MODEL=google/gemini-2.0-flash-lite-001
+DGRID_MODEL=google/gemini-2.5-flash-lite
 
 # Tools
 AVE_AI_API_KEY=
@@ -170,7 +170,7 @@ describe("loadConfig", () => {
       PINATA_JWT: "test",
     });
     expect(cfg.providerAddress).toBe("0x0000000000000000000000000000000000000001");
-    expect(cfg.dgridModel).toBe("google/gemini-2.0-flash-lite-001");
+    expect(cfg.dgridModel).toBe("google/gemini-2.5-flash-lite");
   });
 });
 ```
@@ -195,7 +195,7 @@ const ConfigSchema = z.object({
   FULFILLER_BACKUP_PRIVATE_KEY: z.string().optional(),
   DGRID_API_KEY: z.string().min(1),
   DGRID_BASE_URL: z.string().url().default("https://api.dgrid.ai/v1"),
-  DGRID_MODEL: z.string().min(1).default("google/gemini-2.0-flash-lite-001"),
+  DGRID_MODEL: z.string().min(1).default("google/gemini-2.5-flash-lite"),
   AVE_AI_API_KEY: z.string().optional(),
   AVE_AI_BASE_URL: z.string().url().default("https://api.ave.ai"),
   PINATA_JWT: z.string().min(1),
@@ -522,7 +522,7 @@ describe("runWithTools", () => {
       choices: [{ message: { role: "assistant", content: "0" } }],
     }));
     const result = await runWithTools(cfg, 0, "Resolve?", 3, { chatComplete });
-    expect(result.modelUsed).toBe("google/gemini-2.0-flash-lite-001");
+    expect(result.modelUsed).toBe("google/gemini-2.5-flash-lite");
     expect(result.choice).toBe(0);
   });
 });
@@ -609,7 +609,7 @@ export type RunResult = {
 };
 
 const MODEL_NAMES: Record<number, string> = {
-  0: "google/gemini-2.0-flash-lite-001",
+  0: "google/gemini-2.5-flash-lite",
 };
 
 export async function runWithTools(

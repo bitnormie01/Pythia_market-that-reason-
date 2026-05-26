@@ -19,7 +19,7 @@ describe("loadConfig", () => {
     expect(cfg.providerAddress).toBe("0x0000000000000000000000000000000000000001");
     expect(cfg.dgridApiKey).toBe("sk-dgrid-test");
     expect(cfg.dgridBaseUrl).toBe("https://api.dgrid.ai/v1");
-    expect(cfg.dgridModel).toBe("google/gemini-2.0-flash-lite-001");
+    expect(cfg.dgridModel).toBe("google/gemini-2.5-flash-lite");
     expect(cfg.aveBaseUrl).toBe("https://api.ave.ai");
   });
 });

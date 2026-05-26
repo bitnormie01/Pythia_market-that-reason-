@@ -331,12 +331,9 @@ None of these have indexed parameters in Flap's interface — easy to get wrong,
 
 | Model ID | Name | Price on Pythia stub (OKB) |
 |---|---|---|
-| 0 | `google/gemini-2.0-flash-lite-001` | 0.005 |
-| 1 | `anthropic/claude-sonnet-4.6` | 0.01 |
-| 2 | `deepseek/deepseek-r1` | 0.03 |
-| 3 | `deepseek/deepseek-v4-flash` | 0.01 |
+| 0 | `google/gemini-2.5-flash-lite` | 0.005 |
 
-Hero demo market and seeded markets use **model ID 0** (`google/gemini-2.0-flash-lite-001`) through DGrid's OpenAI-compatible `/chat/completions` API. The worker rejects model IDs `1`, `2`, and `3` for the hackathon deploy rather than silently substituting a different model.
+Hero demo market and seeded markets use **model ID 0** (`google/gemini-2.5-flash-lite`) through DGrid's OpenAI-compatible `/chat/completions` API. The hackathon cheap-mode provider registers only model ID 0, so model IDs `1`, `2`, and `3` are unregistered on-chain and also rejected by the worker rather than silently substituting a different model.
 
 **Fulfillment ordering** (matches Flap's BSC contract exactly — flap-docs lines 686-689): (1) write `_reasoningCids[id] = cid`, (2) set internal `bool _fulfilling = true` reentrancy flag, (3) call consumer in try/catch, (4) on success → status = FULFILLED + emit `FlapAIProviderRequestFulfilled`; on revert → status = UNDELIVERED + emit `FlapAIProviderRequestUndelivered`, (5) clear `_fulfilling`. The CID is stored *before* the callback so the consumer can read it during its own `_fulfillReasoning`. Status is set *after* the callback to mirror Flap exactly — this preserves the ABI-identical claim behaviorally as well as structurally. The `_fulfilling` flag rejects any reentrant call to `reason()` from inside the callback to prevent the consumer from creating new requests mid-fulfillment.
 
@@ -390,7 +387,7 @@ fulfiller/
   "marketId": "7",
   "marketQuestion": "Will OKB close above $42 at 2026-05-25 23:59 UTC?",
   "modelId": 0,
-  "modelName": "google/gemini-2.0-flash-lite-001",
+  "modelName": "google/gemini-2.5-flash-lite",
   "promptKeccak":  "0x...",
   "promptSha256":  "...",
   "fulfilledAt":   "2026-05-25T23:59:43Z (block.timestamp from fulfillment tx)",
@@ -439,7 +436,7 @@ The earlier "5-minute live resolution in a 2-minute video" plan does not survive
 | Expiry | **Set in the past** at recording time (market is already EXPIRED) |
 | Grace | 60s after expiry — already elapsed |
 | Tools | `ave_token_tool` + `onchain_read_tool`. **Cross-oracle agreement is prompt-level only** — the hero-market prompt explicitly instructs the LLM to call both tools and return INVALID if prices diverge by >1%. Not enforced on-chain or by the fulfiller. |
-| Model | DGrid Gemini 2.0 Flash Lite (ID 0) |
+| Model | DGrid Gemini 2.5 Flash Lite (ID 0) |
 | Bond | 5 USDT |
 | Demo flow | Walk through the *already resolved* market end-to-end: show the question + outcome on `/markets/[id]`, click into the IPFS proof viewer, show the chain-of-thought, click Redeem, USDT lands. No timers, no live race against the AI. |
 
@@ -613,7 +610,7 @@ Calendar: Day 2 = May 24, Day 3 = May 25, Day 4 = May 26.
 | Step | Day | Action |
 |---|---|---|
 | 1 | Day 2 | Deploy admin Safe multi-sig (2-of-3, cold signers). Provision two fulfiller EOAs (primary, backup); pre-grant FULFILLER_ROLE to both at provider deploy. |
-| 2 | Day 2 | Deploy `PythiaAIProvider`; register the hackathon cheap-mode model mapping — `google/gemini-2.0-flash-lite-001=0` — while preserving the other registry IDs for compatibility; grant DEFAULT_ADMIN_ROLE to admin Safe, FULFILLER_ROLE to the primary fulfiller EOA |
+| 2 | Day 2 | Deploy `PythiaAIProvider`; register only the hackathon cheap-mode model mapping — `google/gemini-2.5-flash-lite=0`; grant DEFAULT_ADMIN_ROLE to admin Safe, FULFILLER_ROLE to the primary fulfiller EOA |
 | 3 | Day 2 | Mine `PythiaHook` salt for `BEFORE_SWAP_FLAG` (HookMiner) |
 | 4 | Day 3 | Deploy `PythiaHook` via CREATE2 with mined salt; grant DEFAULT_ADMIN_ROLE to admin Safe; seed `allowedTools` with the two MVP tools |
 | 5 | Day 3 | Deploy `OutcomeToken` clone master |

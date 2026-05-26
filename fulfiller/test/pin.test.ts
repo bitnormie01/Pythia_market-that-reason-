@@ -8,7 +8,7 @@ const baseCfg: Config = {
   fulfillerPrivateKey: ("0x" + "1".repeat(64)) as `0x${string}`,
   dgridApiKey: "sk-dgrid-test",
   dgridBaseUrl: "https://api.dgrid.ai/v1",
-  dgridModel: "google/gemini-2.0-flash-lite-001",
+  dgridModel: "google/gemini-2.5-flash-lite",
   aveBaseUrl: "https://api.ave.ai",
   pinataJwt: "pinata-jwt"
 };

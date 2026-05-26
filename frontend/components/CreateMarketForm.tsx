@@ -150,7 +150,7 @@ export default function CreateMarketForm() {
           onChange={(e) => setModelId(parseInt(e.target.value, 10))}
           className="w-full bg-zinc-900 rounded p-3 mt-1"
         >
-          <option value={0}>DGrid Gemini 2.0 Flash Lite (model #0)</option>
+          <option value={0}>DGrid Gemini 2.5 Flash Lite (model #0)</option>
         </select>
       </div>
       <div>

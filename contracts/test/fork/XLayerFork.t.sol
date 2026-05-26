@@ -19,7 +19,7 @@ contract XLayerForkTest is Test {
     function test_can_deploy_provider_on_fork() public {
         PythiaAIProvider provider = new PythiaAIProvider(makeAddr("admin"), makeAddr("fulfiller"), makeAddr("fees"));
 
-        assertEq(provider.getModel(0).name, "google/gemini-2.0-flash-lite-001");
+        assertEq(provider.getModel(0).name, "google/gemini-2.5-flash-lite");
     }
 
     function test_can_deploy_hook_with_mined_address_on_fork() public {

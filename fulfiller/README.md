@@ -6,7 +6,7 @@ Off-chain worker that resolves Pythia prediction-market `reason()` requests on X
 
 ## Cheap DGrid Model Support
 
-This hackathon fulfiller intentionally services only `modelId=0`, registered on-chain as `google/gemini-2.0-flash-lite-001`. The worker submits that exact model ID to DGrid through `/chat/completions`; requests for model IDs `1`, `2`, or `3` are rejected by the worker.
+This hackathon fulfiller intentionally services only `modelId=0`, registered on-chain as `google/gemini-2.5-flash-lite`. The worker submits that exact model ID to DGrid through `/chat/completions`; requests for model IDs `1`, `2`, or `3` are rejected by the worker.
 
 ## Quick start
 

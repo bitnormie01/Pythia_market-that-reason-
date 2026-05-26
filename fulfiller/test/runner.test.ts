@@ -9,7 +9,7 @@ const baseCfg: Config = {
   fulfillerPrivateKey: ("0x" + "1".repeat(64)) as `0x${string}`,
   dgridApiKey: "sk-dgrid-test",
   dgridBaseUrl: "https://api.dgrid.ai/v1",
-  dgridModel: "google/gemini-2.0-flash-lite-001",
+  dgridModel: "google/gemini-2.5-flash-lite",
   aveBaseUrl: "https://api.ave.ai",
   pinataJwt: "pinata-jwt"
 };
@@ -33,9 +33,9 @@ describe("runWithTools", () => {
     });
 
     expect(result.choice).toBe(0);
-    expect(result.modelUsed).toBe("google/gemini-2.0-flash-lite-001");
+    expect(result.modelUsed).toBe("google/gemini-2.5-flash-lite");
     expect(result.steps.some((s) => s.type === "final_choice" && s.choice === 0)).toBe(true);
-    expect(chatComplete.mock.calls[0][1].model).toBe("google/gemini-2.0-flash-lite-001");
+    expect(chatComplete.mock.calls[0][1].model).toBe("google/gemini-2.5-flash-lite");
   });
 
   it("invokes whitelisted tools and feeds results back to the model", async () => {
@@ -145,7 +145,7 @@ describe("runWithTools", () => {
 
   it("throws when env model does not match on-chain model mapping", async () => {
     await expect(
-      runWithTools({ ...baseCfg, dgridModel: "google/gemini-2.5-flash-lite" }, 0, "Resolve?", 3, {
+      runWithTools({ ...baseCfg, dgridModel: "google/gemini-2.5-flash" }, 0, "Resolve?", 3, {
         chatComplete: makeMockChat([])
       })
     ).rejects.toThrow(/DGRID_MODEL mismatch/);

@@ -67,7 +67,7 @@ export type RunnerDeps = {
 };
 
 export const SUPPORTED_MODEL_ID = 0;
-export const DGRID_CHEAP_MODEL = "google/gemini-2.0-flash-lite-001";
+export const DGRID_CHEAP_MODEL = "google/gemini-2.5-flash-lite";
 
 export const MODEL_NAMES: Record<number, string> = {
   [SUPPORTED_MODEL_ID]: DGRID_CHEAP_MODEL
