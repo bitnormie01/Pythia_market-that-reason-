@@ -464,7 +464,7 @@ contract PythiaAIProviderTest is Test {
 
     function test_model_0_is_gemini_3_flash() public view {
         IFlapAIProvider.Model memory m = provider.getModel(0);
-        assertEq(m.name, "google/gemini-3-flash");
+        assertEq(m.name, "google/gemini-2.0-flash-lite-001");
         assertEq(m.price, 0.005 ether);
         assertTrue(m.enabled);
     }
@@ -543,7 +543,7 @@ contract PythiaAIProvider is IFlapAIProvider, AccessControl {
         _grantRole(FULFILLER_ROLE, fulfiller_);
         feeReceiver = feeReceiver_;
 
-        _registerModel(0, "google/gemini-3-flash",        0.005 ether);
+        _registerModel(0, "google/gemini-2.0-flash-lite-001",        0.005 ether);
         _registerModel(1, "anthropic/claude-sonnet-4.6",  0.01 ether);
         _registerModel(2, "deepseek/deepseek-r1",         0.03 ether);
         _registerModel(3, "deepseek/deepseek-v4-flash",   0.01 ether);
@@ -609,7 +609,7 @@ Add to `PythiaAIProviderTest`:
 ```solidity
 function test_reason_emits_event_and_returns_request_id() public {
     string memory prompt = "Test prompt: 0=YES 1=NO 2=INVALID";
-    uint256 fee = 0.01 ether; // Sonnet
+    uint256 fee = 0.005 ether; // DGrid Gemini Flash Lite
 
     vm.deal(address(this), fee);
     vm.expectEmit(false, false, false, true);

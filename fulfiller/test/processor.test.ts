@@ -9,7 +9,9 @@ const cfg: Config = {
   providerAddress: "0x0000000000000000000000000000000000000001",
   hookAddress: "0x0000000000000000000000000000000000000002",
   fulfillerPrivateKey: ("0x" + "1".repeat(64)) as `0x${string}`,
-  anthropicApiKey: "sk-ant-test",
+  dgridApiKey: "sk-dgrid-test",
+  dgridBaseUrl: "https://api.dgrid.ai/v1",
+  dgridModel: "google/gemini-2.0-flash-lite-001",
   aveBaseUrl: "https://api.ave.ai",
   pinataJwt: "pinata-jwt"
 };
@@ -17,7 +19,7 @@ const cfg: Config = {
 const sampleEvent: RequestMadeEvent = {
   requestId: 42n,
   consumer: "0x00000000000000000000000000000000000000c0",
-  modelId: 1,
+  modelId: 0,
   numOfChoices: 3,
   prompt: "Will OKB > $50?"
 };
@@ -33,7 +35,7 @@ function deps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     runWithTools: vi.fn(async () => ({
       choice: 1,
       steps: [{ type: "final_choice", choice: 1, label: "NO", rationale: "stub" }],
-      modelUsed: "claude-sonnet-4-6"
+      modelUsed: "google/gemini-2.0-flash-lite-001"
     })),
     pinTrail: vi.fn(async () => ({ cid: "bafyCID", pins: ["https://gw/bafyCID"] })),
     submitFulfillReasoning: vi.fn(async () => "0xTXFUL" as `0x${string}`),

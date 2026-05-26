@@ -139,7 +139,8 @@ contract PythiaPeripheryTest is PythiaFixture {
         vm.startPrank(alice);
         usdt.approve(address(hook), type(uint256).max);
         for (uint256 i = 0; i < 80 && (yesCurrency0Market == 0 || yesCurrency1Market == 0); i++) {
-            uint256 marketId = hook.createMarket("periphery test", uint64(block.timestamp + 1 days), _tools(), 1, 100e6);
+            uint256 marketId =
+                hook.createMarket("periphery test", uint64(block.timestamp + 1 days), _tools(), 0, 100e6);
             (,, bool yesIsCurrency0,,,,) = hook.marketView(marketId);
             if (yesIsCurrency0 && yesCurrency0Market == 0) {
                 yesCurrency0Market = marketId;

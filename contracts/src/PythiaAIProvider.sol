@@ -23,7 +23,7 @@ contract PythiaAIProvider is IFlapAIProvider, AccessControl {
         _grantRole(FULFILLER_ROLE, fulfiller_);
         feeReceiver = feeReceiver_;
 
-        _registerModel(0, "google/gemini-3-flash", 0.005 ether);
+        _registerModel(0, "google/gemini-2.0-flash-lite-001", 0.005 ether);
         _registerModel(1, "anthropic/claude-sonnet-4.6", 0.01 ether);
         _registerModel(2, "deepseek/deepseek-r1", 0.03 ether);
         _registerModel(3, "deepseek/deepseek-v4-flash", 0.01 ether);

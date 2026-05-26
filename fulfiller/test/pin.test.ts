@@ -6,7 +6,9 @@ const baseCfg: Config = {
   providerAddress: "0x0000000000000000000000000000000000000001",
   hookAddress: "0x0000000000000000000000000000000000000002",
   fulfillerPrivateKey: ("0x" + "1".repeat(64)) as `0x${string}`,
-  anthropicApiKey: "sk-ant-test",
+  dgridApiKey: "sk-dgrid-test",
+  dgridBaseUrl: "https://api.dgrid.ai/v1",
+  dgridModel: "google/gemini-2.0-flash-lite-001",
   aveBaseUrl: "https://api.ave.ai",
   pinataJwt: "pinata-jwt"
 };

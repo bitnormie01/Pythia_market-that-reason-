@@ -12,12 +12,14 @@ describe("loadConfig", () => {
       PYTHIA_AI_PROVIDER_ADDRESS: "0x0000000000000000000000000000000000000001",
       PYTHIA_HOOK_ADDRESS: "0x0000000000000000000000000000000000000002",
       FULFILLER_PRIVATE_KEY: `0x${"1".repeat(64)}`,
-      ANTHROPIC_API_KEY: "sk-ant-test",
+      DGRID_API_KEY: "sk-dgrid-test",
       PINATA_JWT: "test"
     });
 
     expect(cfg.providerAddress).toBe("0x0000000000000000000000000000000000000001");
-    expect(cfg.anthropicApiKey).toBe("sk-ant-test");
+    expect(cfg.dgridApiKey).toBe("sk-dgrid-test");
+    expect(cfg.dgridBaseUrl).toBe("https://api.dgrid.ai/v1");
+    expect(cfg.dgridModel).toBe("google/gemini-2.0-flash-lite-001");
     expect(cfg.aveBaseUrl).toBe("https://api.ave.ai");
   });
 });

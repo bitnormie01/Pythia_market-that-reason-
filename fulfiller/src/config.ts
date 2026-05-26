@@ -7,7 +7,9 @@ const ConfigSchema = z.object({
   PYTHIA_HOOK_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   FULFILLER_PRIVATE_KEY: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
   FULFILLER_BACKUP_PRIVATE_KEY: z.string().regex(/^0x[a-fA-F0-9]{64}$/).optional(),
-  ANTHROPIC_API_KEY: z.string().min(1),
+  DGRID_API_KEY: z.string().min(1),
+  DGRID_BASE_URL: z.string().url().default("https://api.dgrid.ai/v1"),
+  DGRID_MODEL: z.string().min(1).default("google/gemini-2.0-flash-lite-001"),
   AVE_AI_API_KEY: z.string().optional(),
   AVE_AI_BASE_URL: z.string().url().default("https://api.ave.ai"),
   PINATA_JWT: z.string().min(1),
@@ -21,7 +23,9 @@ export type Config = {
   hookAddress: `0x${string}`;
   fulfillerPrivateKey: `0x${string}`;
   fulfillerBackupPrivateKey?: `0x${string}`;
-  anthropicApiKey: string;
+  dgridApiKey: string;
+  dgridBaseUrl: string;
+  dgridModel: string;
   aveApiKey?: string;
   aveBaseUrl: string;
   pinataJwt: string;
@@ -37,7 +41,9 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     hookAddress: parsed.PYTHIA_HOOK_ADDRESS as `0x${string}`,
     fulfillerPrivateKey: parsed.FULFILLER_PRIVATE_KEY as `0x${string}`,
     fulfillerBackupPrivateKey: parsed.FULFILLER_BACKUP_PRIVATE_KEY as `0x${string}` | undefined,
-    anthropicApiKey: parsed.ANTHROPIC_API_KEY,
+    dgridApiKey: parsed.DGRID_API_KEY,
+    dgridBaseUrl: parsed.DGRID_BASE_URL,
+    dgridModel: parsed.DGRID_MODEL,
     aveApiKey: parsed.AVE_AI_API_KEY,
     aveBaseUrl: parsed.AVE_AI_BASE_URL,
     pinataJwt: parsed.PINATA_JWT,

@@ -2,17 +2,17 @@
 
 Off-chain worker that resolves Pythia prediction-market `reason()` requests on X Layer.
 
-**Pipeline:** `FlapAIProviderRequestMade` event → Anthropic Claude Sonnet (with tool calls) → Pinata IPFS pin → `fulfillReasoning(requestId, choice, cid)`.
+**Pipeline:** `FlapAIProviderRequestMade` event → DGrid OpenAI-compatible chat completions → Pinata IPFS pin → `fulfillReasoning(requestId, choice, cid)`.
 
-## Demo Model Support
+## Cheap DGrid Model Support
 
-The on-chain provider registry keeps the Flap-compatible model IDs, but this hackathon fulfiller intentionally services only `modelId=1` (`anthropic/claude-sonnet-4.6`). The Anthropic API call is pinned to `claude-sonnet-4-20250514`. Seed scripts and the frontend create-market form must use model #1; requests for model IDs `0`, `2`, or `3` are rejected by the worker.
+This hackathon fulfiller intentionally services only `modelId=0`, registered on-chain as `google/gemini-2.0-flash-lite-001`. The worker submits that exact model ID to DGrid through `/chat/completions`; requests for model IDs `1`, `2`, or `3` are rejected by the worker.
 
 ## Quick start
 
 ```bash
 cp .env.example .env
-# populate ANTHROPIC_API_KEY, PINATA_JWT, FULFILLER_PRIVATE_KEY,
+# populate DGRID_API_KEY, PINATA_JWT, FULFILLER_PRIVATE_KEY,
 # PYTHIA_AI_PROVIDER_ADDRESS, PYTHIA_HOOK_ADDRESS
 npm install
 npm test
@@ -26,7 +26,7 @@ npm run start
 | `config.ts` | Zod-validated env loader |
 | `persist.ts` | SQLite WAL store with idempotent `recordRequest` |
 | `watcher.ts` | viem `watchContractEvent` over `FlapAIProviderRequestMade` |
-| `runner.ts` | Anthropic SDK tool-call loop (max 5 iterations, fallback `choice=2 INVALID`) |
+| `runner.ts` | DGrid OpenAI-compatible tool-call loop (max 5 iterations, fallback `choice=2 INVALID`) |
 | `tools/aveToken.ts` | `ave_token_tool`: fetches live token metrics from ave.ai |
 | `tools/onchainRead.ts` | `onchain_read_tool`: `parseAbi` + `readContract` on X Layer |
 | `pin.ts` | Pinata IPFS pin plus public gateway URLs |
@@ -53,13 +53,13 @@ npm run start
 3. **Optional live-provider mode**
 
    ```bash
-   ANTHROPIC_API_KEY=sk-ant-... \
+   DGRID_API_KEY=sk-... \
    PINATA_JWT=... \
    SMOKE_LIVE=1 \
    npm run smoke:local
    ```
 
-   Live mode uses the same local chain path but calls Anthropic and Pinata instead of the deterministic mocks.
+   Live mode uses the same local chain path but calls DGrid and Pinata instead of the deterministic mocks.
 
 4. **Inspect the trail**
 

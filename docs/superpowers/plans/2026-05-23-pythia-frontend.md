@@ -753,8 +753,7 @@ export function CreateMarketForm() {
         <label className="text-sm text-zinc-400">Model</label>
         <select value={modelId} onChange={(e) => setModelId(parseInt(e.target.value))}
           className="w-full bg-zinc-900 rounded p-3 mt-1">
-          <option value={1}>Claude Sonnet 4.6 (0.01 OKB)</option>
-          <option value={0}>Gemini 3 Flash (0.005 OKB)</option>
+          <option value={0}>DGrid Gemini 2.0 Flash Lite (0.005 OKB)</option>
         </select>
       </div>
       <div>

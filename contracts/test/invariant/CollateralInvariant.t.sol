@@ -18,7 +18,7 @@ contract CollateralInvariantTest is StdInvariant, PythiaFixture {
 
         vm.startPrank(alice);
         usdt.approve(address(hook), 15e6);
-        marketId = hook.createMarket("invariant market", uint64(block.timestamp + 1 days), tools, 1, 10e6);
+        marketId = hook.createMarket("invariant market", uint64(block.timestamp + 1 days), tools, 0, 10e6);
         vm.stopPrank();
 
         handler = new MintBurnHandler(hook, usdt, marketId);

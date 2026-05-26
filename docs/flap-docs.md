@@ -163,7 +163,7 @@ The following models are available on both BSC Testnet and BNB Mainnet:
 
 | Model ID | Name                          | Price per Request      |
 | -------- | ----------------------------- | ---------------------- |
-| `0`      | `google/gemini-3-flash`       | ~~0.01 BNB~~ 0.005 BNB |
+| `0`      | `google/gemini-2.0-flash-lite-001`       | ~~0.01 BNB~~ 0.005 BNB |
 | `1`      | `anthropic/claude-sonnet-4.6` | 0.05 BNB               |
 | `2`      | `deepseek/deepseek-r1`        | 0.03 BNB               |
 | `3`      | `deepseek/deepseek-v4-flash`  | 0.01 BNB               |
@@ -273,7 +273,7 @@ receive() external payable {
     // Delegate the go/no-go decision to an internal helper.
     if (!_shouldReason()) return;
 
-    uint256 MODEL_ID = 0; // google/gemini-3-flash
+    uint256 MODEL_ID = 0; // google/gemini-2.0-flash-lite-001
     uint8   NUM_CHOICES = 3;
 
     // Build a self-contained prompt that defines all choices.
@@ -333,7 +333,7 @@ contract MinimalVault is VaultBase, FlapAIConsumerBase {
     uint256 public lastRequestId;
     uint8   public lastChoice;
 
-    uint256 constant MODEL_ID    = 0;   // google/gemini-3-flash
+    uint256 constant MODEL_ID    = 0;   // google/gemini-2.0-flash-lite-001
     uint8   constant NUM_CHOICES = 3;
     uint256 constant THRESHOLD   = 1 ether; // only ask AI when vault holds > 1 BNB
 

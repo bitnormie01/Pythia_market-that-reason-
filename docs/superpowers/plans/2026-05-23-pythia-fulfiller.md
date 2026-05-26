@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the off-chain Node.js + TypeScript worker that watches `PythiaAIProvider.FlapAIProviderRequestMade` events on X Layer, runs Claude with tool calls, pins the reasoning trail to IPFS, and submits `fulfillReasoning(requestId, choice, cid)` back on-chain.
+**Goal:** Build the off-chain Node.js + TypeScript worker that watches `PythiaAIProvider.FlapAIProviderRequestMade` events on X Layer, runs DGrid's OpenAI-compatible chat completions with tool calls, pins the reasoning trail to IPFS, and submits `fulfillReasoning(requestId, choice, cid)` back on-chain.
 
-**Architecture:** Single long-running process on a VPS. Event watcher → job queue → LLM runner (Anthropic SDK with tool calls) → IPFS pinning (Pinata + web3.storage dual) → tx submitter. SQLite for crash-safe state. Heartbeat monitoring. Backup fulfiller EOA pre-granted FULFILLER_ROLE on the provider contract for failover.
+**Architecture:** Single long-running process on a VPS. Event watcher -> job queue -> LLM runner (DGrid `/v1/chat/completions` with OpenAI tool calls) -> IPFS pinning (Pinata) -> tx submitter. SQLite for crash-safe state. Heartbeat monitoring. Backup fulfiller EOA pre-granted FULFILLER_ROLE on the provider contract for failover.
 
-**Tech Stack:** Node 20, TypeScript 5, viem 2.x, @anthropic-ai/sdk, better-sqlite3, pino (logger), zod (schema validation), Pinata SDK, web3.storage SDK, vitest (tests).
+**Tech Stack:** Node 20, TypeScript 5, viem 2.x, direct `fetch` to DGrid, better-sqlite3, pino (logger), zod (schema validation), Pinata SDK, vitest (tests).
 
 **Source spec:** `docs/superpowers/specs/2026-05-23-pythia-prediction-market-hook-design.md` §4
 
@@ -48,13 +48,11 @@ npm init -y
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.0",
     "@pinata/sdk": "^2.1.0",
     "better-sqlite3": "^11.0.0",
     "pino": "^9.0.0",
     "pino-pretty": "^11.0.0",
     "viem": "^2.21.0",
-    "web3.storage": "^4.5.5",
     "zod": "^3.23.0"
   },
   "devDependencies": {
@@ -110,7 +108,9 @@ FULFILLER_PRIVATE_KEY=0x...
 FULFILLER_BACKUP_PRIVATE_KEY=0x... # optional, for failover
 
 # LLM
-ANTHROPIC_API_KEY=sk-ant-...
+DGRID_API_KEY=sk-...
+DGRID_BASE_URL=https://api.dgrid.ai/v1
+DGRID_MODEL=google/gemini-2.0-flash-lite-001
 
 # Tools
 AVE_AI_API_KEY=
@@ -118,7 +118,6 @@ AVE_AI_BASE_URL=https://api.ave.ai
 
 # IPFS
 PINATA_JWT=
-WEB3_STORAGE_TOKEN=
 
 # Monitoring
 BETTERSTACK_HEARTBEAT_URL=
@@ -167,11 +166,11 @@ describe("loadConfig", () => {
       PYTHIA_AI_PROVIDER_ADDRESS: "0x0000000000000000000000000000000000000001",
       PYTHIA_HOOK_ADDRESS: "0x0000000000000000000000000000000000000002",
       FULFILLER_PRIVATE_KEY: "0x" + "1".repeat(64),
-      ANTHROPIC_API_KEY: "sk-ant-test",
+      DGRID_API_KEY: "sk-dgrid-test",
       PINATA_JWT: "test",
     });
     expect(cfg.providerAddress).toBe("0x0000000000000000000000000000000000000001");
-    expect(cfg.anthropicApiKey).toBe("sk-ant-test");
+    expect(cfg.dgridModel).toBe("google/gemini-2.0-flash-lite-001");
   });
 });
 ```
@@ -194,11 +193,12 @@ const ConfigSchema = z.object({
   PYTHIA_HOOK_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   FULFILLER_PRIVATE_KEY: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
   FULFILLER_BACKUP_PRIVATE_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().min(1),
+  DGRID_API_KEY: z.string().min(1),
+  DGRID_BASE_URL: z.string().url().default("https://api.dgrid.ai/v1"),
+  DGRID_MODEL: z.string().min(1).default("google/gemini-2.0-flash-lite-001"),
   AVE_AI_API_KEY: z.string().optional(),
   AVE_AI_BASE_URL: z.string().url().default("https://api.ave.ai"),
   PINATA_JWT: z.string().min(1),
-  WEB3_STORAGE_TOKEN: z.string().optional(),
   BETTERSTACK_HEARTBEAT_URL: z.string().url().optional(),
 });
 
@@ -209,11 +209,12 @@ export type Config = {
   hookAddress: `0x${string}`;
   fulfillerPrivateKey: `0x${string}`;
   fulfillerBackupPrivateKey?: `0x${string}`;
-  anthropicApiKey: string;
+  dgridApiKey: string;
+  dgridBaseUrl: string;
+  dgridModel: string;
   aveApiKey?: string;
   aveBaseUrl: string;
   pinataJwt: string;
-  web3StorageToken?: string;
   heartbeatUrl?: string;
 };
 
@@ -226,11 +227,12 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     hookAddress: parsed.PYTHIA_HOOK_ADDRESS as `0x${string}`,
     fulfillerPrivateKey: parsed.FULFILLER_PRIVATE_KEY as `0x${string}`,
     fulfillerBackupPrivateKey: parsed.FULFILLER_BACKUP_PRIVATE_KEY as `0x${string}` | undefined,
-    anthropicApiKey: parsed.ANTHROPIC_API_KEY,
+    dgridApiKey: parsed.DGRID_API_KEY,
+    dgridBaseUrl: parsed.DGRID_BASE_URL,
+    dgridModel: parsed.DGRID_MODEL,
     aveApiKey: parsed.AVE_AI_API_KEY,
     aveBaseUrl: parsed.AVE_AI_BASE_URL,
     pinataJwt: parsed.PINATA_JWT,
-    web3StorageToken: parsed.WEB3_STORAGE_TOKEN,
     heartbeatUrl: parsed.BETTERSTACK_HEARTBEAT_URL,
   };
 }
@@ -500,7 +502,7 @@ git commit -m "feat(fulfiller): event watcher for FlapAIProviderRequestMade"
 
 ## Phase 3 — LLM runner with tool calls
 
-### Task 3.1: Anthropic SDK wrapper with tool registry
+### Task 3.1: DGrid OpenAI-compatible wrapper with tool registry
 
 **Files:**
 - Create: `fulfiller/src/runner.ts`
@@ -508,29 +510,20 @@ git commit -m "feat(fulfiller): event watcher for FlapAIProviderRequestMade"
 - Create: `fulfiller/src/tools/onchainRead.ts`
 - Create: `fulfiller/test/runner.test.ts`
 
-- [ ] **Step 1: Failing test (uses mock Anthropic client)**
+- [ ] **Step 1: Failing test (uses mocked chat completions)**
 
 ```typescript
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { runWithTools } from "../src/runner";
 
-const mockAnthropic = {
-  messages: {
-    create: async () => ({
-      content: [
-        { type: "tool_use", id: "t1", name: "ave_token_tool", input: { chain: "xlayer", address: "0xOKB" } },
-      ],
-      stop_reason: "tool_use",
-    }),
-  },
-} as any;
-
-// Second-call mock would return: { type: "text", text: "0" }
-// For simplicity test only the orchestration shape.
-
 describe("runWithTools", () => {
-  it("returns a valid choice in [0, numOfChoices)", async () => {
-    // … exercise the runner with mocked tools, verify it returns 0/1/2
+  it("returns a valid choice from DGrid chat text", async () => {
+    const chatComplete = vi.fn(async () => ({
+      choices: [{ message: { role: "assistant", content: "0" } }],
+    }));
+    const result = await runWithTools(cfg, 0, "Resolve?", 3, { chatComplete });
+    expect(result.modelUsed).toBe("google/gemini-2.0-flash-lite-001");
+    expect(result.choice).toBe(0);
   });
 });
 ```
@@ -600,11 +593,9 @@ export async function callOnchainRead(cfg: Config, input: { contract: string; si
 
 `fulfiller/src/runner.ts`:
 ```typescript
-import Anthropic from "@anthropic-ai/sdk";
 import { aveTokenToolDef, callAveToken } from "./tools/aveToken";
 import { onchainReadToolDef, callOnchainRead } from "./tools/onchainRead";
 import { Config } from "./config";
-import { logger } from "./logger";
 
 export type TrailStep =
   | { type: "thought"; text: string }
@@ -618,9 +609,7 @@ export type RunResult = {
 };
 
 const MODEL_NAMES: Record<number, string> = {
-  0: "claude-haiku-4-5",         // not registered on-chain — used only if explicitly selected
-  1: "claude-sonnet-4-6",
-  // 2, 3 reserved for deepseek — implemented separately if needed
+  0: "google/gemini-2.0-flash-lite-001",
 };
 
 export async function runWithTools(
@@ -629,63 +618,53 @@ export async function runWithTools(
   prompt: string,
   numOfChoices: number
 ): Promise<RunResult> {
-  const client = new Anthropic({ apiKey: cfg.anthropicApiKey });
   const modelName = MODEL_NAMES[modelId];
-  if (!modelName) throw new Error(`Unsupported model ID: ${modelId}`);
+  if (!modelName) throw new Error(`Unsupported model ID: ${modelId}. Cheap DGrid mode supports only modelId=0.`);
+  if (cfg.dgridModel !== modelName) throw new Error(`DGRID_MODEL mismatch: expected ${modelName}, got ${cfg.dgridModel}`);
 
   const steps: TrailStep[] = [];
   const messages: any[] = [{ role: "user", content: prompt }];
-  const tools = [aveTokenToolDef, onchainReadToolDef];
+  const tools = [aveTokenToolDef, onchainReadToolDef].map((tool) => ({
+    type: "function",
+    function: { name: tool.name, description: tool.description, parameters: tool.input_schema },
+  }));
 
   for (let iter = 0; iter < 5; iter++) {
-    const response = await client.messages.create({
-      model: modelName,
-      max_tokens: 1024,
-      tools,
-      messages,
+    const response = await fetch(`${cfg.dgridBaseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cfg.dgridApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelName, max_tokens: 1024, tools, messages }),
     });
+    if (!response.ok) throw new Error(`DGrid chat completion failed ${response.status}`);
+    const json = await response.json() as any;
+    const message = json.choices?.[0]?.message ?? {};
+    const text = message.content ?? "";
+    const toolCalls = message.tool_calls ?? [];
 
-    let toolUseFound = false;
-    const assistantContent: any[] = [];
-
-    for (const block of response.content) {
-      assistantContent.push(block);
-      if (block.type === "text") {
-        steps.push({ type: "thought", text: block.text });
-        const match = block.text.match(/\b([0-9]+)\b/);
-        if (match) {
-          const choice = parseInt(match[1], 10);
-          if (choice >= 0 && choice < numOfChoices) {
-            steps.push({ type: "final_choice", choice, label: ["YES", "NO", "INVALID"][choice] ?? "?", rationale: block.text });
-            return { choice, steps, modelUsed: modelName };
-          }
+    if (text) steps.push({ type: "thought", text });
+    if (toolCalls.length === 0) {
+      const match = text.match(/\b([0-9]+)\b/);
+      if (match) {
+        const choice = parseInt(match[1], 10);
+        if (choice >= 0 && choice < numOfChoices) {
+          steps.push({ type: "final_choice", choice, label: ["YES", "NO", "INVALID"][choice] ?? "?", rationale: text });
+          return { choice, steps, modelUsed: modelName };
         }
-      } else if (block.type === "tool_use") {
-        toolUseFound = true;
-        let toolResult;
-        if (block.name === "ave_token_tool" || block.name === "ave_token_info") {
-          toolResult = await callAveToken(cfg, block.input as any);
-        } else if (block.name === "onchain_read_tool") {
-          toolResult = await callOnchainRead(cfg, block.input as any);
-        } else {
-          toolResult = { result: { error: "tool not whitelisted" }, rawResponseSha256: "" };
-        }
-        steps.push({
-          type: "tool_call",
-          tool: block.name,
-          args: block.input,
-          result: toolResult.result,
-          rawResponseSha256: toolResult.rawResponseSha256,
-        });
-        messages.push({ role: "assistant", content: assistantContent });
-        messages.push({
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(toolResult.result) }],
-        });
       }
+      break;
     }
 
-    if (!toolUseFound && response.stop_reason === "end_turn") break;
+    messages.push({ role: "assistant", content: text || null, tool_calls: toolCalls });
+    for (const call of toolCalls) {
+      const args = JSON.parse(call.function.arguments || "{}");
+      const toolResult = call.function.name === "ave_token_tool"
+        ? await callAveToken(cfg, args)
+        : call.function.name === "onchain_read_tool"
+          ? await callOnchainRead(cfg, args)
+          : { result: { error: "tool not whitelisted" }, rawResponseSha256: "" };
+      steps.push({ type: "tool_call", tool: call.function.name, args, result: toolResult.result, rawResponseSha256: toolResult.rawResponseSha256 });
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(toolResult.result) });
+    }
   }
 
   // Fallback if no valid choice extracted
@@ -698,14 +677,14 @@ export async function runWithTools(
 
 ```bash
 git add fulfiller/src/runner.ts fulfiller/src/tools/
-git commit -m "feat(fulfiller): Anthropic runner with ave_token + onchain_read tool calls"
+git commit -m "feat(fulfiller): DGrid runner with ave_token + onchain_read tool calls"
 ```
 
 ---
 
-## Phase 4 — IPFS pin (dual: Pinata + web3.storage)
+## Phase 4 — IPFS pin (Pinata)
 
-### Task 4.1: Pin trail JSON to both providers in parallel
+### Task 4.1: Pin trail JSON to Pinata
 
 **Files:**
 - Create: `fulfiller/src/pin.ts`
@@ -723,39 +702,26 @@ export async function pinTrail(cfg: Config, trail: object): Promise<{ cid: strin
   const pinata = new pinataSDK({ pinataJWTKey: cfg.pinataJwt });
 
   const pinPinata = pinata.pinJSONToIPFS(JSON.parse(json), { pinataMetadata: { name: "pythia-trail" } });
-  const pinW3S = cfg.web3StorageToken ? pinToWeb3Storage(cfg.web3StorageToken, json) : Promise.resolve(null);
 
-  const [pRes, w3Res] = await Promise.allSettled([pinPinata, pinW3S]);
+  const [pRes] = await Promise.allSettled([pinPinata]);
   let cid: string | undefined;
   const pins: string[] = [];
-  if (pRes.status === "fulfilled") { cid = pRes.value.IpfsHash; pins.push(`https://pinata.cloud/ipfs/${cid}`); }
-  if (w3Res.status === "fulfilled" && w3Res.value) { cid = cid ?? w3Res.value; pins.push(`https://w3s.link/ipfs/${w3Res.value}`); }
+  if (pRes.status === "fulfilled") { cid = pRes.value.IpfsHash; pins.push(`https://gateway.pinata.cloud/ipfs/${cid}`); }
   if (!cid) throw new Error("All IPFS pin attempts failed");
-  pins.push(`https://cf-ipfs.com/ipfs/${cid}`);
+  pins.push(`https://cloudflare-ipfs.com/ipfs/${cid}`);
   return { cid, pins };
-}
-
-async function pinToWeb3Storage(token: string, json: string): Promise<string> {
-  const resp = await fetch("https://api.web3.storage/upload", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: json,
-  });
-  if (!resp.ok) throw new Error(`web3.storage: ${resp.status}`);
-  const data = await resp.json() as { cid: string };
-  return data.cid;
 }
 ```
 
 - [ ] **Step 2: Test with mocked SDKs**
 
-(Mock `@pinata/sdk` and `fetch` globally in vitest; verify both pins are attempted and the function returns a CID.)
+(Mock `@pinata/sdk` in vitest; verify Pinata success returns a CID and gateway URLs, and Pinata failure throws.)
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add fulfiller/src/pin.ts fulfiller/test/pin.test.ts
-git commit -m "feat(fulfiller): dual IPFS pin (Pinata + web3.storage) with fallback"
+git commit -m "feat(fulfiller): Pinata IPFS pin with fallback gateway"
 ```
 
 ---

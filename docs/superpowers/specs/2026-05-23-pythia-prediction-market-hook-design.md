@@ -84,9 +84,9 @@ The hook plugs directly into V4's canonical `PoolManager` on X Layer (`0x360e68f
   ┌──────────────────────────────────────────────────────────────────┐
   │  pythia-fulfiller (Node + TypeScript worker)                     │
   │     ├─ watcher.ts   - viem watchContractEvent                    │
-  │     ├─ runner.ts    - Anthropic Claude with tool calls           │
+  │     ├─ runner.ts    - DGrid Gemini with tool calls               │
   │     ├─ tools/       - ave_token_tool, onchain_read_tool          │
-  │     ├─ pin.ts       - IPFS pin to Pinata + web3.storage          │
+  │     ├─ pin.ts       - IPFS pin to Pinata                         │
   │     └─ submit.ts    - viem walletClient submits fulfillReasoning │
   │                                                                  │
   │  pythia-frontend (Next.js 15 on Vercel)                          │
@@ -327,16 +327,16 @@ None of these have indexed parameters in Flap's interface — easy to get wrong,
 - `DEFAULT_ADMIN_ROLE` — Safe multi-sig (2-of-3) deployed on X Layer. Holds admin powers (model registry, fee receiver, prompt-length / callback-gas setters). Cold-storage signers; not used during normal operation.
 - `FULFILLER_ROLE` — Single hot EOA managed by the off-chain worker (multi-sig is incompatible with automated tx submission). Backup hot EOA pre-granted FULFILLER_ROLE for failover. Both keys monitored for balance + activity by the admin multi-sig holders.
 
-**Model registry** — IDs and names match Flap's BSC mainnet registry **exactly** so the one-line swap is real. Lifted from `flap-docs.md` lines 163-169:
+**Model registry** — IDs and names are deployment-specific for the hackathon cheap-mode provider:
 
 | Model ID | Name | Price on Pythia stub (OKB) |
 |---|---|---|
-| 0 | `google/gemini-3-flash` | 0.005 |
+| 0 | `google/gemini-2.0-flash-lite-001` | 0.005 |
 | 1 | `anthropic/claude-sonnet-4.6` | 0.01 |
 | 2 | `deepseek/deepseek-r1` | 0.03 |
 | 3 | `deepseek/deepseek-v4-flash` | 0.01 |
 
-We do NOT use Sonnet 4.7 — Flap is on 4.6 and matching is more important than the minor version bump. Hero demo market and seeded markets all use **model ID 1** (Sonnet 4.6). Our backend `runner.ts` translates each ID to the corresponding Anthropic / Google / DeepSeek API call.
+Hero demo market and seeded markets use **model ID 0** (`google/gemini-2.0-flash-lite-001`) through DGrid's OpenAI-compatible `/chat/completions` API. The worker rejects model IDs `1`, `2`, and `3` for the hackathon deploy rather than silently substituting a different model.
 
 **Fulfillment ordering** (matches Flap's BSC contract exactly — flap-docs lines 686-689): (1) write `_reasoningCids[id] = cid`, (2) set internal `bool _fulfilling = true` reentrancy flag, (3) call consumer in try/catch, (4) on success → status = FULFILLED + emit `FlapAIProviderRequestFulfilled`; on revert → status = UNDELIVERED + emit `FlapAIProviderRequestUndelivered`, (5) clear `_fulfilling`. The CID is stored *before* the callback so the consumer can read it during its own `_fulfillReasoning`. Status is set *after* the callback to mirror Flap exactly — this preserves the ABI-identical claim behaviorally as well as structurally. The `_fulfilling` flag rejects any reentrant call to `reason()` from inside the callback to prevent the consumer from creating new requests mid-fulfillment.
 
@@ -353,11 +353,11 @@ We do NOT use Sonnet 4.7 — Flap is on 4.6 and matching is more important than 
 ```
 fulfiller/
 ├── watcher.ts              - viem watchContractEvent on FlapAIProviderRequestMade
-├── runner.ts               - Anthropic Claude API with tools[], streaming
+├── runner.ts               - DGrid Gemini API with tools[], streaming
 ├── tools/
 │   ├── ave_token_tool.ts   - HTTP GET ave.ai/token/xlayer/{addr}
 │   └── onchain_read_tool.ts - viem readContract on X Layer
-├── pin.ts                  - Pinata + web3.storage parallel pin
+├── pin.ts                  - Pinata pin plus public gateway URLs
 ├── submit.ts               - viem walletClient.writeContract(fulfillReasoning)
 ├── persist.ts              - SQLite KV: requestId → (cid, txHash, status)
 └── monitor.ts              - heartbeat + balance alert
@@ -365,14 +365,14 @@ fulfiller/
 
 **Hosting**: Runs on a single small VPS (Fly.io machine or Hetzner CX22) with attached volume for SQLite. **NOT** Vercel — Vercel functions can't host a long-running event watcher with persistent disk. Heartbeat pings an uptime monitor (BetterStack / UptimeRobot). SQLite is a *cache*; ground truth is on-chain — the worker can fully rebuild state from `provider.getRecentRequests()` + IPFS pin status if the disk is lost.
 
-**End-to-end target**: <30s. Realistic worst case: ~60s (Anthropic rate limit + IPFS pin spike).
+**End-to-end target**: <30s. Realistic worst case: ~60s (DGrid model availability + IPFS pin spike).
 
 **Failure modes & handling**:
 | Failure | Handling |
 |---|---|
 | LLM out-of-range choice | Coerce to 2 (INVALID), note in trail |
-| Anthropic rate-limited | **Do NOT silently substitute models** — the on-chain `modelId` and the IPFS trail would lie. Worker calls `refundRequest(id)`; the user gets OKB back; the next poke retries. Demo path uses pre-recorded markets so this is moot for the video. |
-| IPFS pin slow / fails | Pin to Pinata AND web3.storage in parallel; first CID wins |
+| DGrid model unavailable | **Do NOT silently substitute models** — the on-chain `modelId` and the IPFS trail would lie. Worker calls `refundRequest(id)`; the user gets OKB back; the next poke retries. Demo path uses pre-recorded markets so this is moot for the video. |
+| IPFS pin slow / fails | Pin to Pinata; expose Pinata and Cloudflare gateway URLs |
 | All pins fail | Refund (returns OKB to requester); market re-pokeable |
 | On-chain submit fails | Retry with bumped gas; persist to SQLite |
 | Worker crash | Restart reads SQLite, queries on-chain status, resumes |
@@ -389,8 +389,8 @@ fulfiller/
   "consumer": "0x...PythiaHook",
   "marketId": "7",
   "marketQuestion": "Will OKB close above $42 at 2026-05-25 23:59 UTC?",
-  "modelId": 1,
-  "modelName": "anthropic/claude-sonnet-4.6",
+  "modelId": 0,
+  "modelName": "google/gemini-2.0-flash-lite-001",
   "promptKeccak":  "0x...",
   "promptSha256":  "...",
   "fulfilledAt":   "2026-05-25T23:59:43Z (block.timestamp from fulfillment tx)",
@@ -439,7 +439,7 @@ The earlier "5-minute live resolution in a 2-minute video" plan does not survive
 | Expiry | **Set in the past** at recording time (market is already EXPIRED) |
 | Grace | 60s after expiry — already elapsed |
 | Tools | `ave_token_tool` + `onchain_read_tool`. **Cross-oracle agreement is prompt-level only** — the hero-market prompt explicitly instructs the LLM to call both tools and return INVALID if prices diverge by >1%. Not enforced on-chain or by the fulfiller. |
-| Model | Sonnet 4.6 (ID 1) |
+| Model | DGrid Gemini 2.0 Flash Lite (ID 0) |
 | Bond | 5 USDT |
 | Demo flow | Walk through the *already resolved* market end-to-end: show the question + outcome on `/markets/[id]`, click into the IPFS proof viewer, show the chain-of-thought, click Redeem, USDT lands. No timers, no live race against the AI. |
 
@@ -613,7 +613,7 @@ Calendar: Day 2 = May 24, Day 3 = May 25, Day 4 = May 26.
 | Step | Day | Action |
 |---|---|---|
 | 1 | Day 2 | Deploy admin Safe multi-sig (2-of-3, cold signers). Provision two fulfiller EOAs (primary, backup); pre-grant FULFILLER_ROLE to both at provider deploy. |
-| 2 | Day 2 | Deploy `PythiaAIProvider`; register all four Flap-BSC-matching models — `gemini-3-flash=0`, `claude-sonnet-4.6=1`, `deepseek-r1=2`, `deepseek-v4-flash=3` (per §4.1); grant DEFAULT_ADMIN_ROLE to admin Safe, FULFILLER_ROLE to both fulfiller EOAs |
+| 2 | Day 2 | Deploy `PythiaAIProvider`; register the hackathon cheap-mode model mapping — `google/gemini-2.0-flash-lite-001=0` — while preserving the other registry IDs for compatibility; grant DEFAULT_ADMIN_ROLE to admin Safe, FULFILLER_ROLE to the primary fulfiller EOA |
 | 3 | Day 2 | Mine `PythiaHook` salt for `BEFORE_SWAP_FLAG` (HookMiner) |
 | 4 | Day 3 | Deploy `PythiaHook` via CREATE2 with mined salt; grant DEFAULT_ADMIN_ROLE to admin Safe; seed `allowedTools` with the two MVP tools |
 | 5 | Day 3 | Deploy `OutcomeToken` clone master |
@@ -645,7 +645,7 @@ DAY 3 — May 25
   [5h] Periphery: poolManager.unlock + sync/settle/take + hook.mintFor/burn + approval path
        (~200 LOC contract + Foundry tests + cross-clone-ordering coverage)
        Permit2 signature flow remains a follow-up on top of the working approval path.
-  [2h] pythia-fulfiller v0: Anthropic + IPFS pin + submit
+  [2h] pythia-fulfiller v0: DGrid + IPFS pin + submit
 
 DAY 4 — May 26
   [4h] Frontend: list, detail, create, buy/sell, LP
@@ -698,7 +698,7 @@ Five concrete markets created during Day 4 / Day 5 so judges see a populated pla
 |---|---|---|
 | HookMiner Solidity-version / init-code-hash drift | Low | Mined salt depends on the hook's init code hash, which depends on compiler version + optimizer runs. Pin Foundry `solc` profile + optimizer config; re-mining is fast (~ms for our 2-flag pattern at bits 7 + 9) but breaks any pre-deployed peripheral that hardcodes the hook address. Mine once after pinning the profile, never re-mine. |
 | V4 + Hook integration sharp edge | Medium | Day 3 fork tests; V4 docs are decent |
-| Anthropic rate-limit during demo | Low–Med | Fallback model + cached fixture |
+| DGrid model outage during demo | Low–Med | Fallback model + cached fixture |
 | OKLink verification fails | Low | Verify each contract day-of-deploy |
 | IPFS pin slow during demo | Medium | Dual-pin + warm-up label in UI |
 | OKX Wallet quirks with V4 calldata | Medium | Test Day 2; fall back to MetaMask if broken |
@@ -713,7 +713,7 @@ Five concrete markets created during Day 4 / Day 5 so judges see a populated pla
 2. **Tool-result tampering** — Backend could lie about HTTPS responses. Mitigated by `rawResponseSha256` in trail + cross-oracle agreement on hero demo market. Not solved.
 3. **Prompt injection via question** — Mitigated by control-char filter, length cap, XML delimiter, and system instruction. Not provably watertight.
 4. **INVALID exploit** — Creator bond burn disincentivises malformed questions; honest 50/50 split for legitimate ambiguity. Bond is a friction, not a guarantee. **Bond is uncuttable** (see §6.3).
-5. **IPFS pin durability** — Dual-pin (Pinata + web3.storage) reduces single-provider risk; doesn't eliminate it for retention >1 year.
+5. **IPFS pin durability** — Hackathon deploy pins to Pinata only and exposes a Cloudflare gateway URL for retrieval. Long-term retention still needs a second modern pinning provider before mainnet promotion.
 6. **`lastRequestId()` returns 0** — Documented deviation; Flap's explorer will paint "no pending request" against our consumer. Use `pendingRequestIds()` for the real list.
 7. **Mainnet-only V4** — No X Layer testnet for V4 means real-money demo and limited test surface; mitigated by fork tests and small bond amounts.
 8. **Off-pool secondary markets in OutcomeTokens are unblockable.** OutcomeToken clones are plain ERC20s. Anyone can `poolManager.initialize(YES, NO, hooks=address(0))` and create a competing pool that bypasses our hook. Post-resolution, traders could dump losing-side tokens to unsuspecting parties on alt pools. **The canonical settlement price is solely from our pool** — README + frontend make this clear. Transfer guards on OutcomeToken would conflict with V4 LP removal, so we don't add them. *Caveat emptor* for off-pool trades.

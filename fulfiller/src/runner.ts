@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./config";
 import { aveTokenToolDef, callAveToken as defaultCallAveToken, type AveTokenInput } from "./tools/aveToken";
 import {
@@ -24,8 +23,42 @@ export type RunResult = {
   modelUsed: string;
 };
 
+type OpenAiToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
+type ChatMessage = {
+  role: "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: OpenAiToolCall[];
+  tool_call_id?: string;
+};
+
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      role?: string;
+      content?: string | null;
+      tool_calls?: OpenAiToolCall[];
+    };
+    finish_reason?: string;
+  }>;
+};
+
+type ChatCompletionBody = {
+  model: string;
+  max_tokens: number;
+  tools: ReturnType<typeof toOpenAiTool>[];
+  messages: ChatMessage[];
+};
+
 export type RunnerDeps = {
-  anthropic?: Pick<Anthropic, "messages"> | { messages: { create: (...args: any[]) => Promise<any> } };
+  chatComplete?: (cfg: Config, body: ChatCompletionBody) => Promise<ChatCompletionResponse>;
   callAveToken?: (cfg: Config, input: AveTokenInput) => Promise<{ result: unknown; rawResponseSha256: string }>;
   callOnchainRead?: (
     cfg: Config,
@@ -33,14 +66,26 @@ export type RunnerDeps = {
   ) => Promise<{ result: unknown; rawResponseSha256: string }>;
 };
 
-export const SUPPORTED_MODEL_ID = 1;
+export const SUPPORTED_MODEL_ID = 0;
+export const DGRID_CHEAP_MODEL = "google/gemini-2.0-flash-lite-001";
 
 export const MODEL_NAMES: Record<number, string> = {
-  [SUPPORTED_MODEL_ID]: "claude-sonnet-4-20250514"
+  [SUPPORTED_MODEL_ID]: DGRID_CHEAP_MODEL
 };
 
 const CHOICE_LABELS = ["YES", "NO", "INVALID"] as const;
 const MAX_ITERATIONS = 5;
+
+function toOpenAiTool(tool: { name: string; description: string; input_schema: unknown }) {
+  return {
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.input_schema
+    }
+  };
+}
 
 function extractChoice(text: string, numOfChoices: number): number | null {
   const matches = Array.from(text.matchAll(/\b([0-9]+)\b/g));
@@ -49,6 +94,30 @@ function extractChoice(text: string, numOfChoices: number): number | null {
     if (Number.isInteger(v) && v >= 0 && v < numOfChoices) return v;
   }
   return null;
+}
+
+async function defaultChatComplete(cfg: Config, body: ChatCompletionBody): Promise<ChatCompletionResponse> {
+  const base = cfg.dgridBaseUrl.replace(/\/+$/, "");
+  const resp = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${cfg.dgridApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`DGrid chat completion failed ${resp.status}: ${text.slice(0, 512)}`);
+  }
+
+  return JSON.parse(text) as ChatCompletionResponse;
+}
+
+function parseToolArgs(raw: string): unknown {
+  if (!raw) return {};
+  return JSON.parse(raw);
 }
 
 export async function runWithTools(
@@ -60,102 +129,89 @@ export async function runWithTools(
 ): Promise<RunResult> {
   const modelName = MODEL_NAMES[modelId];
   if (!modelName) {
-    throw new Error(`Unsupported model ID: ${modelId}. Hackathon fulfiller supports only modelId=1 (Sonnet).`);
+    throw new Error(`Unsupported model ID: ${modelId}. Cheap DGrid mode supports only modelId=0.`);
+  }
+  if (cfg.dgridModel !== modelName) {
+    throw new Error(`DGRID_MODEL mismatch: expected ${modelName}, got ${cfg.dgridModel}`);
   }
 
-  const anthropic = deps.anthropic ?? new Anthropic({ apiKey: cfg.anthropicApiKey });
+  const chatComplete = deps.chatComplete ?? defaultChatComplete;
   const aveTool = deps.callAveToken ?? defaultCallAveToken;
   const onchainTool = deps.callOnchainRead ?? defaultCallOnchainRead;
 
   const steps: TrailStep[] = [];
-  const messages: Array<{ role: "user" | "assistant"; content: any }> = [
-    { role: "user", content: prompt }
-  ];
-  const tools = [aveTokenToolDef, onchainReadToolDef];
+  const messages: ChatMessage[] = [{ role: "user", content: prompt }];
+  const tools = [toOpenAiTool(aveTokenToolDef), toOpenAiTool(onchainReadToolDef)];
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const response = await anthropic.messages.create({
+    const response = await chatComplete(cfg, {
       model: modelName,
       max_tokens: 1024,
       tools,
       messages
     });
 
-    const blocks: any[] = response.content ?? [];
-    const assistantContent: any[] = [];
-    const toolResultsForNextTurn: any[] = [];
+    const message = response.choices?.[0]?.message ?? {};
+    const text = message.content ?? "";
+    const toolCalls = message.tool_calls ?? [];
 
-    for (const block of blocks) {
-      assistantContent.push(block);
+    if (text) {
+      steps.push({ type: "thought", text });
+    }
 
-      if (block.type === "text") {
-        const text: string = block.text ?? "";
-        steps.push({ type: "thought", text });
-        const choice = extractChoice(text, numOfChoices);
-        if (choice !== null && (response.stop_reason === "end_turn" || !blocks.some((b) => b.type === "tool_use"))) {
-          steps.push({
-            type: "final_choice",
-            choice,
-            label: CHOICE_LABELS[choice] ?? `CHOICE_${choice}`,
-            rationale: text
-          });
-          return { choice, steps, modelUsed: modelName };
-        }
-      } else if (block.type === "tool_use") {
-        let toolResult: { result: unknown; rawResponseSha256: string };
-        try {
-          if (block.name === aveTokenToolDef.name) {
-            toolResult = await aveTool(cfg, block.input as AveTokenInput);
-          } else if (block.name === onchainReadToolDef.name) {
-            toolResult = await onchainTool(cfg, block.input as OnchainReadInput);
-          } else {
-            toolResult = {
-              result: { error: `tool '${block.name}' is not whitelisted` },
-              rawResponseSha256: ""
-            };
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          toolResult = { result: { error: message }, rawResponseSha256: "" };
-        }
-
+    if (toolCalls.length === 0) {
+      const choice = extractChoice(text, numOfChoices);
+      if (choice !== null) {
         steps.push({
-          type: "tool_call",
-          tool: block.name,
-          args: block.input,
-          result: toolResult.result,
-          rawResponseSha256: toolResult.rawResponseSha256
+          type: "final_choice",
+          choice,
+          label: CHOICE_LABELS[choice] ?? `CHOICE_${choice}`,
+          rationale: text
         });
-
-        toolResultsForNextTurn.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: JSON.stringify(toolResult.result)
-        });
+        return { choice, steps, modelUsed: modelName };
       }
+      break;
     }
 
-    if (toolResultsForNextTurn.length === 0) {
-      // No more tools requested; if we got here without a final_choice, give the model one more pass with a nudge.
-      if (response.stop_reason === "end_turn") {
-        const lastText = [...blocks].reverse().find((b) => b.type === "text")?.text ?? "";
-        const choice = extractChoice(lastText, numOfChoices);
-        if (choice !== null) {
-          steps.push({
-            type: "final_choice",
-            choice,
-            label: CHOICE_LABELS[choice] ?? `CHOICE_${choice}`,
-            rationale: lastText
-          });
-          return { choice, steps, modelUsed: modelName };
+    messages.push({
+      role: "assistant",
+      content: text || null,
+      tool_calls: toolCalls
+    });
+
+    for (const call of toolCalls) {
+      let args: unknown = {};
+      let toolResult: { result: unknown; rawResponseSha256: string };
+      try {
+        args = parseToolArgs(call.function.arguments);
+        if (call.function.name === aveTokenToolDef.name) {
+          toolResult = await aveTool(cfg, args as AveTokenInput);
+        } else if (call.function.name === onchainReadToolDef.name) {
+          toolResult = await onchainTool(cfg, args as OnchainReadInput);
+        } else {
+          toolResult = {
+            result: { error: `tool '${call.function.name}' is not whitelisted` },
+            rawResponseSha256: ""
+          };
         }
-        break;
+      } catch (err) {
+        const message_ = err instanceof Error ? err.message : String(err);
+        toolResult = { result: { error: message_ }, rawResponseSha256: "" };
       }
-    }
 
-    messages.push({ role: "assistant", content: assistantContent });
-    if (toolResultsForNextTurn.length > 0) {
-      messages.push({ role: "user", content: toolResultsForNextTurn });
+      steps.push({
+        type: "tool_call",
+        tool: call.function.name,
+        args,
+        result: toolResult.result,
+        rawResponseSha256: toolResult.rawResponseSha256
+      });
+
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify(toolResult.result)
+      });
     }
   }
 

@@ -77,7 +77,9 @@ async function main(): Promise<void> {
     providerAddress,
     hookAddress: ZERO_ADDRESS,
     fulfillerPrivateKey: privateKey,
-    anthropicApiKey: live ? requireEnv("ANTHROPIC_API_KEY") : "local-smoke",
+    dgridApiKey: live ? requireEnv("DGRID_API_KEY") : "local-smoke",
+    dgridBaseUrl: process.env.DGRID_BASE_URL ?? "https://api.dgrid.ai/v1",
+    dgridModel: process.env.DGRID_MODEL ?? MODEL_NAMES[SUPPORTED_MODEL_ID],
     aveBaseUrl: process.env.AVE_AI_BASE_URL ?? "https://api.ave.ai",
     pinataJwt: live ? requireEnv("PINATA_JWT") : "local-smoke"
   };
@@ -116,7 +118,7 @@ async function main(): Promise<void> {
       abi: providerArtifact.abi,
       functionName: "reason",
       args: [BigInt(SUPPORTED_MODEL_ID), prompt, 3],
-      value: parseEther("0.01"),
+      value: parseEther("0.005"),
       chain: xLayer
     });
     await publicClient.waitForTransactionReceipt({ hash: reasonHash });

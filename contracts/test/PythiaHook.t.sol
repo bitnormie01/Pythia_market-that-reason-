@@ -85,7 +85,7 @@ contract PythiaHookTest is PythiaFixture {
         vm.startPrank(alice);
         usdt.approve(address(hook), bondAndSeed);
         uint256 marketId = hook.createMarket(
-            "Will OKB > $42 by 2026-05-25 23:59 UTC?", uint64(block.timestamp + 1 days), tools, 1, 10e6
+            "Will OKB > $42 by 2026-05-25 23:59 UTC?", uint64(block.timestamp + 1 days), tools, 0, 10e6
         );
         vm.stopPrank();
 
@@ -109,7 +109,7 @@ contract PythiaHookTest is PythiaFixture {
         usdt.approve(address(hook), 100e6);
         string memory tooLong = string(new bytes(281));
         vm.expectRevert(PythiaHook.QuestionTooLong.selector);
-        hook.createMarket(tooLong, uint64(block.timestamp + 1 days), tools, 1, 10e6);
+        hook.createMarket(tooLong, uint64(block.timestamp + 1 days), tools, 0, 10e6);
         vm.stopPrank();
     }
 
@@ -120,7 +120,7 @@ contract PythiaHookTest is PythiaFixture {
         vm.startPrank(alice);
         usdt.approve(address(hook), 100e6);
         vm.expectRevert(PythiaHook.ToolNotWhitelisted.selector);
-        hook.createMarket("q?", uint64(block.timestamp + 1 days), tools, 1, 10e6);
+        hook.createMarket("q?", uint64(block.timestamp + 1 days), tools, 0, 10e6);
         vm.stopPrank();
     }
 
@@ -129,7 +129,7 @@ contract PythiaHookTest is PythiaFixture {
         vm.startPrank(alice);
         usdt.approve(address(hook), 100e6);
         vm.expectRevert(PythiaHook.InsufficientInitialLiquidity.selector);
-        hook.createMarket("q?", uint64(block.timestamp + 1 days), tools, 1, 4e6);
+        hook.createMarket("q?", uint64(block.timestamp + 1 days), tools, 0, 4e6);
         vm.stopPrank();
     }
 
@@ -138,14 +138,14 @@ contract PythiaHookTest is PythiaFixture {
             IFlapAIProvider.Model({name: "disabled", price: 0.01 ether, enabled: false});
         vm.mockCall(
             address(provider),
-            abi.encodeWithSelector(IFlapAIProvider.getModel.selector, uint256(1)),
+            abi.encodeWithSelector(IFlapAIProvider.getModel.selector, uint256(0)),
             abi.encode(disabled)
         );
 
         vm.startPrank(alice);
         usdt.approve(address(hook), 15e6);
         vm.expectRevert(bytes("model disabled"));
-        hook.createMarket("q?", uint64(block.timestamp + 1 days), _tools(), 1, 10e6);
+        hook.createMarket("q?", uint64(block.timestamp + 1 days), _tools(), 0, 10e6);
         vm.stopPrank();
     }
 
@@ -160,7 +160,7 @@ contract PythiaHookTest is PythiaFixture {
 
         vm.startPrank(alice);
         usdt.approve(address(hook), 15e6);
-        uint256 marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), tools, 1, 10e6);
+        uint256 marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), tools, 0, 10e6);
         vm.stopPrank();
 
         PoolKey memory key = hook.poolKey(marketId);
@@ -456,7 +456,7 @@ contract PythiaHookTest is PythiaFixture {
 
         IFlapAIProvider.RequestView memory req = provider.getRequest(requestId);
         assertEq(req.consumer, address(hook));
-        assertEq(req.modelId, 1);
+        assertEq(req.modelId, 0);
         assertEq(req.numOfChoices, hook.NUM_OF_CHOICES());
         assertEq(uint8(req.status), uint8(IFlapAIProvider.RequestStatus.PENDING));
         assertEq(req.feePaid, price);
@@ -798,7 +798,7 @@ contract PythiaHookTest is PythiaFixture {
     function _createDefaultMarket() internal returns (uint256 marketId, address yesT, address noT) {
         vm.startPrank(alice);
         usdt.approve(address(hook), 15e6);
-        marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), _tools(), 1, 10e6);
+        marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), _tools(), 0, 10e6);
         vm.stopPrank();
 
         (yesT, noT,,,,,) = hook.marketView(marketId);
@@ -807,7 +807,7 @@ contract PythiaHookTest is PythiaFixture {
     function _createMarketFromThis() internal returns (uint256 marketId, address yesT, address noT) {
         usdt.mint(address(this), 100e6);
         usdt.approve(address(hook), 15e6);
-        marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), _tools(), 1, 10e6);
+        marketId = hook.createMarket("test", uint64(block.timestamp + 1 days), _tools(), 0, 10e6);
 
         (yesT, noT,,,,,) = hook.marketView(marketId);
     }
@@ -836,7 +836,7 @@ contract PythiaHookTest is PythiaFixture {
     }
 
     function _modelPrice() internal view returns (uint256) {
-        return provider.getModel(1).price;
+        return provider.getModel(0).price;
     }
 
     function _warpExpired() internal {

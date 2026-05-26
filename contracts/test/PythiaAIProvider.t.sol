@@ -27,7 +27,7 @@ contract MockConsumer {
     function onFlapAIRequestRefunded(uint256) external payable {}
 
     function reason() external payable returns (uint256) {
-        return IFlapAIProvider(provider).reason{value: msg.value}(1, "prompt", 3);
+        return IFlapAIProvider(provider).reason{value: msg.value}(0, "prompt", 3);
     }
 }
 
@@ -45,7 +45,7 @@ contract MockRefundReverter {
     }
 
     function reason() external payable returns (uint256) {
-        return IFlapAIProvider(provider).reason{value: msg.value}(1, "prompt", 3);
+        return IFlapAIProvider(provider).reason{value: msg.value}(0, "prompt", 3);
     }
 }
 
@@ -60,9 +60,9 @@ contract PythiaAIProviderTest is Test {
         provider = new PythiaAIProvider(admin, fulfiller, feeReceiver);
     }
 
-    function test_model_0_is_gemini_3_flash() public view {
+    function test_model_0_is_dgrid_gemini_flash_lite() public view {
         IFlapAIProvider.Model memory m = provider.getModel(0);
-        assertEq(m.name, "google/gemini-3-flash");
+        assertEq(m.name, "google/gemini-2.0-flash-lite-001");
         assertEq(m.price, 0.005 ether);
         assertTrue(m.enabled);
     }
@@ -101,18 +101,18 @@ contract PythiaAIProviderTest is Test {
 
     function test_reason_emits_event_and_returns_request_id() public {
         string memory prompt = "Test prompt: 0=YES 1=NO 2=INVALID";
-        uint256 fee = 0.01 ether;
+        uint256 fee = 0.005 ether;
 
         vm.deal(address(this), fee);
         vm.expectEmit(false, false, false, true);
-        emit IFlapAIProvider.FlapAIProviderRequestMade(1, address(this), 1, prompt, 3, fee);
+        emit IFlapAIProvider.FlapAIProviderRequestMade(1, address(this), 0, prompt, 3, fee);
 
-        uint256 id = provider.reason{value: fee}(1, prompt, 3);
+        uint256 id = provider.reason{value: fee}(0, prompt, 3);
         assertEq(id, 1);
 
         IFlapAIProvider.RequestView memory r = provider.getRequest(id);
         assertEq(r.consumer, address(this));
-        assertEq(r.modelId, 1);
+        assertEq(r.modelId, 0);
         assertEq(r.numOfChoices, 3);
         assertEq(uint8(r.status), uint8(IFlapAIProvider.RequestStatus.PENDING));
         assertEq(r.feePaid, fee);
@@ -122,15 +122,15 @@ contract PythiaAIProviderTest is Test {
     function test_reason_reverts_on_insufficient_fee() public {
         vm.deal(address(this), 0.001 ether);
         vm.expectRevert(
-            abi.encodeWithSelector(IFlapAIProvider.FlapAIProviderInsufficientFee.selector, 0.001 ether, 0.01 ether)
+            abi.encodeWithSelector(IFlapAIProvider.FlapAIProviderInsufficientFee.selector, 0.001 ether, 0.005 ether)
         );
-        provider.reason{value: 0.001 ether}(1, "x", 3);
+        provider.reason{value: 0.001 ether}(0, "x", 3);
     }
 
     function test_reason_reverts_on_zero_numOfChoices() public {
         vm.deal(address(this), 1 ether);
         vm.expectRevert(abi.encodeWithSelector(IFlapAIProvider.FlapAIProviderInvalidNumOfChoices.selector, 0));
-        provider.reason{value: 0.01 ether}(1, "x", 0);
+        provider.reason{value: 0.005 ether}(0, "x", 0);
     }
 
     function test_reason_reverts_when_prompt_too_long() public {
@@ -139,7 +139,7 @@ contract PythiaAIProviderTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IFlapAIProvider.FlapAIProviderPromptExceedsMaxLength.selector, 6001, 6000)
         );
-        provider.reason{value: 0.01 ether}(1, string(big), 3);
+        provider.reason{value: 0.005 ether}(0, string(big), 3);
     }
 
     function test_reason_reverts_on_unregistered_model() public {
@@ -151,7 +151,7 @@ contract PythiaAIProviderTest is Test {
     function test_fulfillReasoning_stores_cid_then_calls_consumer_then_sets_FULFILLED() public {
         MockConsumer c = new MockConsumer(address(provider));
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         provider.fulfillReasoning(id, 0, "bafyTESTCID");
@@ -166,7 +166,7 @@ contract PythiaAIProviderTest is Test {
         MockConsumer c = new MockConsumer(address(provider));
         c.setShouldRevert(true);
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         provider.fulfillReasoning(id, 1, "bafyREVERTED");
@@ -179,7 +179,7 @@ contract PythiaAIProviderTest is Test {
     function test_fulfillReasoning_reverts_on_non_PENDING() public {
         MockConsumer c = new MockConsumer(address(provider));
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         provider.fulfillReasoning(id, 0, "cid");
@@ -192,7 +192,7 @@ contract PythiaAIProviderTest is Test {
     function test_fulfillReasoning_reverts_on_choice_out_of_range() public {
         MockConsumer c = new MockConsumer(address(provider));
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         vm.expectRevert(abi.encodeWithSelector(IFlapAIProvider.FlapAIProviderChoiceOutOfRange.selector, 3, 3));
@@ -202,7 +202,7 @@ contract PythiaAIProviderTest is Test {
     function test_only_FULFILLER_ROLE_can_fulfill() public {
         MockConsumer c = new MockConsumer(address(provider));
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.expectRevert();
         provider.fulfillReasoning(id, 0, "cid");
@@ -211,7 +211,7 @@ contract PythiaAIProviderTest is Test {
     function test_refundRequest_returns_fee_to_consumer_and_calls_back() public {
         MockConsumer c = new MockConsumer(address(provider));
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         uint256 balBefore = address(c).balance;
 
@@ -220,7 +220,7 @@ contract PythiaAIProviderTest is Test {
 
         IFlapAIProvider.RequestView memory r = provider.getRequest(id);
         assertEq(uint8(r.status), uint8(IFlapAIProvider.RequestStatus.REFUNDED));
-        assertEq(address(c).balance, balBefore + 0.01 ether);
+        assertEq(address(c).balance, balBefore + 0.005 ether);
     }
 
     function test_setCallbackGasLimit_enforces_1m_floor() public {
@@ -276,23 +276,23 @@ contract PythiaAIProviderTest is Test {
     function test_sweep_recovers_failed_refund_delivery() public {
         MockRefundReverter c = new MockRefundReverter(address(provider));
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         provider.refundRequest(id);
-        assertEq(address(provider).balance, 0.01 ether);
+        assertEq(address(provider).balance, 0.005 ether);
 
         uint256 receiverBefore = feeReceiver.balance;
         provider.sweep();
         assertEq(address(provider).balance, 0);
-        assertEq(feeReceiver.balance, receiverBefore + 0.01 ether);
+        assertEq(feeReceiver.balance, receiverBefore + 0.005 ether);
     }
 
     function test_recoverUndeliveredFee_admin_recovers_to_receiver() public {
         MockConsumer c = new MockConsumer(address(provider));
         c.setShouldRevert(true);
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         provider.fulfillReasoning(id, 1, "bafyUNDELIVERED");
@@ -303,7 +303,7 @@ contract PythiaAIProviderTest is Test {
         vm.prank(admin);
         provider.recoverUndeliveredFee(id, receiver);
 
-        assertEq(receiver.balance - receiverBefore, 0.01 ether);
+        assertEq(receiver.balance - receiverBefore, 0.005 ether);
         IFlapAIProvider.RequestView memory r = provider.getRequest(id);
         assertEq(uint8(r.status), uint8(IFlapAIProvider.RequestStatus.REFUNDED));
     }
@@ -312,7 +312,7 @@ contract PythiaAIProviderTest is Test {
         MockConsumer c = new MockConsumer(address(provider));
         c.setShouldRevert(true);
         vm.deal(address(this), 1 ether);
-        uint256 id = c.reason{value: 0.01 ether}();
+        uint256 id = c.reason{value: 0.005 ether}();
 
         vm.prank(fulfiller);
         provider.fulfillReasoning(id, 1, "bafyUNDELIVERED");
@@ -326,8 +326,8 @@ contract PythiaAIProviderTest is Test {
 
         MockConsumer c = new MockConsumer(address(provider));
         vm.deal(address(this), 1 ether);
-        c.reason{value: 0.01 ether}();
-        c.reason{value: 0.01 ether}();
+        c.reason{value: 0.005 ether}();
+        c.reason{value: 0.005 ether}();
         assertEq(provider.getTotalRequests(), 2);
     }
 }

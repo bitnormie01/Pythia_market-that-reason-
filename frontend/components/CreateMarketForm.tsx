@@ -15,13 +15,13 @@ import { ADDRESSES, USDT_DECIMALS } from "@/lib/contracts";
 
 const TOOL_HASHES = [keccak256(toBytes("ave_token_tool")), keccak256(toBytes("onchain_read_tool"))] as const;
 const QUESTION_FORBIDDEN = /[<>[\]{}]/; // basic prompt-injection guard, matches on-chain Hook check
-const SUPPORTED_MODEL_ID = 1;
+const SUPPORTED_MODEL_ID = 0;
 
 export default function CreateMarketForm() {
   const { address } = useAccount();
   const [question, setQuestion] = useState("");
   const [expiry, setExpiry] = useState("");
-  const [modelId, setModelId] = useState(1);
+  const [modelId, setModelId] = useState(0);
   const [initialLp, setInitialLp] = useState("10");
   const { writeContract, isPending, data: pendingHash } = useWriteContract();
   const receipt = useWaitForTransactionReceipt({ hash: pendingHash });
@@ -101,7 +101,7 @@ export default function CreateMarketForm() {
       return;
     }
     if (modelId !== SUPPORTED_MODEL_ID) {
-      toast.error("Only model #1 is enabled for the hackathon fulfiller");
+      toast.error("Only model #0 is enabled for cheap DGrid mode");
       return;
     }
     writeContract(
@@ -150,7 +150,7 @@ export default function CreateMarketForm() {
           onChange={(e) => setModelId(parseInt(e.target.value, 10))}
           className="w-full bg-zinc-900 rounded p-3 mt-1"
         >
-          <option value={1}>Claude Sonnet 4.6 (model #1)</option>
+          <option value={0}>DGrid Gemini 2.0 Flash Lite (model #0)</option>
         </select>
       </div>
       <div>
