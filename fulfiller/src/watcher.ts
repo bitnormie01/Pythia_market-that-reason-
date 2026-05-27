@@ -52,6 +52,8 @@ export function startWatcher(cfg: Config, handler: (event: RequestMadeEvent) => 
     address: cfg.providerAddress,
     abi: PythiaAIProviderAbi,
     eventName: "FlapAIProviderRequestMade",
+    poll: true,
+    pollingInterval: 5000,
     onLogs: async (logs) => {
       for (const log of logs) {
         try {
