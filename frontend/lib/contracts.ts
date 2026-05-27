@@ -6,11 +6,11 @@ function envAddr(name: string, fallback: `0x${string}` = FALLBACK_ZERO): `0x${st
 }
 
 export const ADDRESSES = {
-  hook: envAddr("NEXT_PUBLIC_HOOK_ADDRESS"),
-  provider: envAddr("NEXT_PUBLIC_PROVIDER_ADDRESS"),
-  periphery: envAddr("NEXT_PUBLIC_PERIPHERY_ADDRESS"),
+  hook: envAddr("NEXT_PUBLIC_HOOK_ADDRESS", "0xB5370e00d486a39eb3654e41F8b8425b24D94880"),
+  provider: envAddr("NEXT_PUBLIC_PROVIDER_ADDRESS", "0x68B343fd826e2837Fc8B69f418C0612116ca807B"),
+  periphery: envAddr("NEXT_PUBLIC_PERIPHERY_ADDRESS", "0x9443e94449eD090BACf996c199B3aA18362170C3"),
   usdt: envAddr("NEXT_PUBLIC_USDT_ADDRESS", "0x779ded0c9e1022225f8e0630b35a9b54be713736"),
-  outcomeMaster: envAddr("NEXT_PUBLIC_OUTCOME_MASTER_ADDRESS"),
+  outcomeMaster: envAddr("NEXT_PUBLIC_OUTCOME_MASTER_ADDRESS", "0xe8Af06794f0E8AEB5E5eD6fB2D3cfbaDCB70082A"),
   poolManager: "0x360e68faccca8ca495c1b759fd9eee466db9fb32" as `0x${string}`,
   quoter: "0x8928074ca1b241d8ec02815881c1af11e8bc5219" as `0x${string}`,
   universalRouter: "0x8b844f885672f333bc0042cb669255f93a4c1e6b" as `0x${string}`,
