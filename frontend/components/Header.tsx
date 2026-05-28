@@ -1,10 +1,11 @@
 "use client";
 
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Icon, Logo } from "@/components/ui";
+import { Icon } from "@/components/ui";
 
 export default function Header() {
   const pathname = usePathname();
@@ -14,7 +15,7 @@ export default function Header() {
     <header className="app-header">
       <div className="app-header__left">
         <Link href="/markets" className="app-header__brand">
-          <Logo size={22} />
+          <Image src="/pythia-mark.svg" alt="" width={32} height={32} className="brand-mark" priority />
           <span>Pythia</span>
           <span className="app-header__tagline">· Markets that reason</span>
         </Link>

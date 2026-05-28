@@ -126,6 +126,13 @@ button, input, select, textarea { font: inherit; }
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  box-shadow: 0 0 18px rgba(0, 255, 128, 0.28);
+  flex: 0 0 auto;
+}
 .app-header__tagline { color: var(--text-tertiary); font-weight: 400; font-size: 13px; }
 .app-header__nav { display: flex; gap: 4px; }
 .nav-link {
