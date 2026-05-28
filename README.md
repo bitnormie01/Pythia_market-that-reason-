@@ -16,6 +16,7 @@ No centralized oracle. No vote aggregation. Every resolution ships with a CID th
   - PythiaHook — [`0xB5370e00d486a39eb3654e41F8b8425b24D94880`](https://www.oklink.com/xlayer/address/0xB5370e00d486a39eb3654e41F8b8425b24D94880)
   - PythiaAIProvider — [`0x68B343fd826e2837Fc8B69f418C0612116ca807B`](https://www.oklink.com/xlayer/address/0x68B343fd826e2837Fc8B69f418C0612116ca807B)
   - PythiaPeriphery — [`0x9443e94449eD090BACf996c199B3aA18362170C3`](https://www.oklink.com/xlayer/address/0x9443e94449eD090BACf996c199B3aA18362170C3)
+  - OutcomeToken master — [`0xe8Af06794f0E8AEB5E5eD6fB2D3cfbaDCB70082A`](https://www.oklink.com/xlayer/address/0xe8Af06794f0E8AEB5E5eD6fB2D3cfbaDCB70082A)
 
 The deployed contracts accept market creation from any address. Anyone with USDT on X Layer can create a market through the live frontend right now.
 
