@@ -1,7 +1,0 @@
-# Auto-generated files
-docs/api/**
-
-# Build outputs
-dist/
-node_modules/
-.nx/

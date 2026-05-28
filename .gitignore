@@ -1,2 +1,6 @@
 .env.deploy
 *.env.deploy
+.env
+.env.local
+.env.deploy.local
+*.env.deploy.local
