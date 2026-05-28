@@ -2,23 +2,44 @@
 
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+import { Icon, Logo } from "@/components/ui";
 
 export default function Header() {
+  const pathname = usePathname();
+  const active = (href: string) => pathname === href || (href === "/markets" && pathname.startsWith("/markets/"));
+
   return (
-    <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
-      <Link href="/" className="text-xl font-mono">
-        <span className="text-emerald-400">Pythia</span>
-        <span className="text-zinc-500 ml-2 text-sm hidden sm:inline">/ markets that reason</span>
-      </Link>
-      <nav className="flex items-center gap-3 sm:gap-6 text-sm">
-        <Link href="/markets" className="hover:text-emerald-400">
-          Markets
+    <header className="app-header">
+      <div className="app-header__left">
+        <Link href="/markets" className="app-header__brand">
+          <Logo size={22} />
+          <span>Pythia</span>
+          <span className="app-header__tagline">· Markets that reason</span>
         </Link>
-        <Link href="/markets/create" className="hover:text-emerald-400 hidden sm:inline">
-          Create
-        </Link>
+        <nav className="app-header__nav">
+          <Link className="nav-link" data-active={active("/markets")} href="/markets">
+            <Icon name="grid" size={13} /> Markets
+          </Link>
+          <Link className="nav-link" data-active={active("/markets/create")} href="/markets/create">
+            <Icon name="plus" size={13} /> Create
+          </Link>
+          <Link className="nav-link" data-active={pathname.startsWith("/proofs")} href="/proofs/demo">
+            <Icon name="file" size={13} /> Proofs
+          </Link>
+          <a className="nav-link" href="https://github.com/bitnormie01/Pythia_market-that-reason-" target="_blank" rel="noreferrer">
+            Docs <Icon name="external" size={11} />
+          </a>
+        </nav>
+      </div>
+      <div className="app-header__right">
+        <div className="chain-chip">
+          <span className="chain-chip__dot" />
+          X Layer · 196
+        </div>
         <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
-      </nav>
+      </div>
     </header>
   );
 }

@@ -10,14 +10,16 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ i
     return (
       <>
         <Header />
-        <main className="max-w-3xl mx-auto px-6 py-12 text-rose-400">Invalid market id: {id}</main>
+        <main className="page page--narrow">
+          <div className="banner banner--warn">Invalid market id: {id}</div>
+        </main>
       </>
     );
   }
   return (
     <>
       <Header />
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <main className="page">
         <MarketDetail marketId={marketId} />
       </main>
     </>

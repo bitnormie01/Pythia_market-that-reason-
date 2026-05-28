@@ -2,29 +2,51 @@
 
 import Link from "next/link";
 
-import { formatExpiry, statusLabel } from "@/lib/format";
+import { ProbBar, StatusTag } from "@/components/ui";
+import { formatExpiryParts, truncateAddress } from "@/lib/format";
 
 export type MarketCardData = {
   id: bigint;
   question: string;
   expiry: bigint;
   status: number;
+  creator?: `0x${string}`;
+  modelId?: number;
+  winningChoice?: number;
 };
 
 export function MarketCard({ data }: { data: MarketCardData }) {
+  const expiry = formatExpiryParts(data.expiry);
   return (
-    <Link
-      href={`/markets/${data.id.toString()}`}
-      className="block border border-zinc-800 rounded p-4 hover:border-emerald-500 transition"
-    >
-      <div className="flex items-center justify-between text-xs text-zinc-500 mb-2">
-        <span>#{data.id.toString()}</span>
-        <span className="px-2 py-0.5 bg-zinc-900 rounded">{statusLabel(data.status)}</span>
+    <Link href={`/markets/${data.id.toString()}`} className="market-card col between">
+      <div>
+        <div className="row between gap-2" style={{ marginBottom: 12 }}>
+          <span className="font-mono muted" style={{ fontSize: 12 }}>
+            #{data.id.toString().padStart(3, "0")}
+          </span>
+          <StatusTag status={data.status} winningChoice={data.winningChoice} />
+        </div>
+        <p className="market-question line-clamp-3" style={{ minHeight: 62, margin: 0 }}>
+          {data.question}
+        </p>
       </div>
-      <p className="text-base mb-3 line-clamp-3 min-h-[3.5rem]">{data.question}</p>
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-emerald-400 font-mono text-xs">Expires</span>
-        <span className="text-zinc-500 text-xs">{formatExpiry(data.expiry)}</span>
+
+      <div className="col gap-2" style={{ marginTop: 18 }}>
+        <ProbBar />
+        <div className="row between gap-2" style={{ fontSize: 12 }}>
+          <span className="muted">Probability not indexed</span>
+          <span className="font-mono muted">— / —</span>
+        </div>
+        <div className="row between gap-2" style={{ paddingTop: 6, borderTop: "1px solid var(--border)", fontSize: 12 }}>
+          <div className="col">
+            <span className="muted">Expires</span>
+            <span>{expiry.date}</span>
+          </div>
+          <div className="col" style={{ alignItems: "flex-end" }}>
+            <span className="muted">{expiry.rel}</span>
+            <span className="font-mono muted">{data.creator ? truncateAddress(data.creator) : `Model #${data.modelId ?? 0}`}</span>
+          </div>
+        </div>
       </div>
     </Link>
   );

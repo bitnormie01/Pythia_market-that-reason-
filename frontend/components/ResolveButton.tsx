@@ -4,6 +4,7 @@ import { formatEther } from "viem";
 import { useAccount, useBalance, useReadContract, useWriteContract } from "wagmi";
 import { toast } from "sonner";
 
+import { Icon, Tag } from "@/components/ui";
 import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
 import { ADDRESSES } from "@/lib/contracts";
@@ -45,57 +46,60 @@ export default function ResolveButton({ marketId, modelId }: { marketId: bigint;
         value: price
       },
       {
-        onSuccess: () => toast.success("Resolution requested. AI is reasoning…"),
+        onSuccess: () => toast.success("Resolution requested. AI is reasoning..."),
         onError: (err) => toast.error(err.message.slice(0, 240))
       }
     );
   }
 
   return (
-    <div className="border border-amber-700 rounded p-4 bg-amber-950/30 space-y-3">
-      <p className="text-sm">
-        This market has expired. Pay the AI fee to trigger resolution.{" "}
-        <span className="text-zinc-500">(Anyone can poke — fees are reimbursed if the AI returns INVALID.)</span>
-      </p>
-      <div className="flex items-baseline justify-between text-sm">
-        <span className="font-mono text-amber-400">
-          {price ? `${formatEther(price)} OKB` : "Loading fee…"}
-        </span>
-        <span className="text-zinc-500 text-xs">
-          your balance: {balance.data ? formatEther(balanceValue) : "—"} OKB
-        </span>
+    <section className="panel">
+      <div className="panel__head">
+        <span className="panel__title">Resolution request</span>
+        <Tag variant="warn"><Icon name="lock" size={11} /> expired</Tag>
       </div>
-      {hasEnoughOkb ? (
-        <button
-          onClick={onResolve}
-          disabled={isPending}
-          className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 px-4 py-2 rounded font-semibold disabled:opacity-50"
-        >
-          {isPending ? "Confirming…" : "Resolve"}
-        </button>
-      ) : (
-        <div className="space-y-2">
-          <a
-            href={OKX_SWAP_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="block text-center bg-amber-500 hover:bg-amber-400 text-zinc-950 px-4 py-2 rounded font-semibold"
-          >
-            1) Get OKB on OKX DEX ↗
-          </a>
-          <button
-            onClick={onResolve}
-            disabled
-            className="w-full border border-zinc-700 text-zinc-500 px-4 py-2 rounded font-semibold"
-          >
-            2) Resolve (after you have OKB)
-          </button>
-          <p className="text-xs text-zinc-500">
-            Universal Router path: <code className="text-zinc-300">USDT → WOKB (V3 0.3%)</code> → unwrap WOKB →
-            send native OKB. Build this combined route on-deploy; for now use the OKX swap widget.
-          </p>
+      <div className="panel__body col gap-3">
+        <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+          Anyone can pay the model fee to request AI resolution. If the off-chain worker fails, the provider refund path resets the market.
+        </p>
+        <div className="panel" style={{ background: "var(--surface-2)" }}>
+          <div className="three-col">
+            <div className="stat">
+              <div className="stat__label">Model</div>
+              <div className="stat__value" style={{ fontSize: 13 }}>{model?.name ?? `#${modelId}`}</div>
+              <div className="stat__sub">registry id #{modelId}</div>
+            </div>
+            <div className="stat">
+              <div className="stat__label">Fee</div>
+              <div className="stat__value">{price ? formatEther(price) : "—"}</div>
+              <div className="stat__sub">OKB</div>
+            </div>
+            <div className="stat">
+              <div className="stat__label">Your balance</div>
+              <div className="stat__value">{balance.data ? Number(formatEther(balanceValue)).toFixed(4) : "—"}</div>
+              <div className="stat__sub">OKB</div>
+            </div>
+          </div>
         </div>
-      )}
-    </div>
+
+        {hasEnoughOkb ? (
+          <button onClick={onResolve} disabled={isPending} className="btn btn--primary btn--full btn--lg">
+            {isPending ? "Confirming..." : "Request AI resolution"}
+          </button>
+        ) : (
+          <div className="col gap-2">
+            <a href={OKX_SWAP_URL} target="_blank" rel="noreferrer" className="btn btn--primary btn--full">
+              <Icon name="external" size={13} /> Get OKB on OKX DEX
+            </a>
+            <button onClick={onResolve} disabled className="btn btn--full">
+              Resolve after wallet has OKB
+            </button>
+            <p className="field__hint">
+              Current MVP uses the OKX swap widget for USDT → OKB. In-app Universal Router unwrap flow is deferred.
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

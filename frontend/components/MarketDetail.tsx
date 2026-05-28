@@ -6,22 +6,23 @@ import { useReadContract, useWatchContractEvent } from "wagmi";
 import ResolveButton from "@/components/ResolveButton";
 import { ShareButton, type Outcome } from "@/components/ShareButton";
 import TradePanel from "@/components/TradePanel";
+import { CopyChip, Icon, StatusTag, Tag } from "@/components/ui";
 import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
-import { ADDRESSES, MARKET_STATUS_LABEL } from "@/lib/contracts";
-import { formatExpiry, statusLabel, truncateAddress } from "@/lib/format";
+import { ADDRESSES } from "@/lib/contracts";
+import { formatExpiry, formatExpiryParts, truncateAddress } from "@/lib/format";
 
 type MarketTuple = readonly [
-  string, // question
-  bigint, // expiry
-  number, // modelId
-  number, // status
-  `0x${string}`, // creator
-  boolean, // yesIsCurrency0
-  unknown, // poolKey tuple
-  `0x${string}`, // yesToken
-  `0x${string}`, // noToken
-  number // winningChoice
+  string,
+  bigint,
+  number,
+  number,
+  `0x${string}`,
+  boolean,
+  unknown,
+  `0x${string}`,
+  `0x${string}`,
+  number
 ];
 
 type ReasoningRequest = {
@@ -35,6 +36,8 @@ type ReasoningRequest = {
   choice: number;
   reasoningCid: string;
 };
+
+const CHOICE_LABELS: Record<number, Outcome> = { 0: "YES", 1: "NO", 2: "INVALID" };
 
 export default function MarketDetail({ marketId }: { marketId: bigint }) {
   const marketQuery = useReadContract({
@@ -98,92 +101,118 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
     }
   });
 
-  if (marketQuery.isLoading) return <p className="text-zinc-500">Loading market…</p>;
+  if (marketQuery.isLoading) {
+    return <div className="panel"><div className="panel__body muted">Loading market...</div></div>;
+  }
   if (!marketQuery.data) {
     return (
-      <p className="text-rose-400 text-sm">
-        Market #{marketId.toString()} not found.{" "}
-        <Link href="/markets" className="text-emerald-400">
-          Back to markets
-        </Link>
-      </p>
+      <div className="banner banner--warn">
+        <Icon name="x" size={14} />
+        Market #{marketId.toString()} not found. <Link href="/markets" style={{ color: "var(--accent)" }}>Back to markets</Link>
+      </div>
     );
   }
 
   const tuple = marketQuery.data as unknown as MarketTuple;
-  const [question, expiry, modelId, storedStatus, creator, , , yesToken, noToken, winningChoice] = tuple;
+  const [question, expiry, modelId, storedStatus, creator, yesIsCurrency0, , yesToken, noToken, winningChoice] = tuple;
   const effectiveStatus = (statusQuery.data as number | undefined) ?? storedStatus;
   const statusNum = Number(effectiveStatus);
   const request = requestQuery.data as unknown as ReasoningRequest | undefined;
+  const expiryParts = formatExpiryParts(expiry);
+  const outcome = CHOICE_LABELS[Number(winningChoice)] ?? "INVALID";
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 space-y-6">
-        <header>
-          <div className="flex items-center gap-3 text-xs text-zinc-500 mb-2">
-            <span>Market #{marketId.toString()}</span>
-            <span className="px-2 py-0.5 bg-zinc-900 rounded">{statusLabel(statusNum)}</span>
-            <span>Model #{Number(modelId)}</span>
-          </div>
-          <h1 className="text-2xl font-mono leading-snug">{question}</h1>
-          <p className="text-sm text-zinc-500 mt-2">
-            Expires {formatExpiry(expiry)} · Creator {truncateAddress(creator)}
-          </p>
-        </header>
+    <div className="detail-grid">
+      <div className="col gap-4">
+        <div className="row gap-2" style={{ fontSize: 12 }}>
+          <Link href="/markets" className="btn btn--ghost btn--sm">
+            <Icon name="arrowLeft" size={12} /> Markets
+          </Link>
+          <span className="muted">/</span>
+          <span className="muted">Market #{marketId.toString()}</span>
+        </div>
 
-        {statusNum === 1 && (
-          <ResolveButton marketId={marketId} modelId={Number(modelId)} />
-        )}
-
-        {statusNum === 2 && (
-          <div className="border border-amber-700 rounded p-4 bg-amber-950/30 text-sm">
-            <p className="text-amber-300 font-mono">RESOLVING…</p>
-            <p className="text-zinc-300 mt-2">
-              The AI fulfiller has picked this market up. The reasoning trail and final choice will appear
-              on-chain as soon as the fulfiller's tx confirms.
-            </p>
-          </div>
-        )}
-
-        {statusNum === 3 && (
-          <div className="border border-emerald-700 rounded p-4 bg-emerald-950/20 text-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="font-mono">
-                <span className="text-emerald-400">RESOLVED →</span>{" "}
-                <span className="text-zinc-100">
-                  {Number(winningChoice) === 0 ? "YES" : Number(winningChoice) === 1 ? "NO" : "INVALID"}
-                </span>
-              </p>
-              {request?.reasoningCid && (
+        <section className="panel">
+          <div className="panel__body" style={{ padding: 20 }}>
+            <div className="row between gap-3" style={{ marginBottom: 12, alignItems: "flex-start" }}>
+              <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+                <StatusTag status={statusNum} winningChoice={Number(winningChoice)} />
+                <Tag variant="neutral">Model #{Number(modelId)}</Tag>
+                <Tag variant="info">X Layer</Tag>
+              </div>
+              {statusNum === 3 && request?.reasoningCid && (
                 <ShareButton
                   question={question}
-                  outcome={
-                    (Number(winningChoice) === 0 ? "YES" : Number(winningChoice) === 1 ? "NO" : "INVALID") as Outcome
-                  }
+                  outcome={outcome}
                   proofUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/proofs/${request.reasoningCid}`}
                 />
               )}
             </div>
-            {request?.reasoningCid && (
-              <Link
-                href={`/proofs/${request.reasoningCid}`}
-                className="text-emerald-400 hover:underline inline-block"
-              >
-                View AI reasoning trail →
-              </Link>
-            )}
+            <h1 style={{ margin: 0, fontSize: 26, lineHeight: 1.25, letterSpacing: "-0.01em" }}>{question}</h1>
+            <div className="row gap-3" style={{ flexWrap: "wrap", marginTop: 14, color: "var(--text-secondary)", fontSize: 13 }}>
+              <span><Icon name="clock" size={13} /> Expires {formatExpiry(expiry)} ({expiryParts.rel})</span>
+              <span>Creator <CopyChip value={creator} label={truncateAddress(creator)} /></span>
+            </div>
           </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel__head">
+            <span className="panel__title">Market state</span>
+            <Tag variant="neutral">verified hook read</Tag>
+          </div>
+          <div className="three-col">
+            <div className="stat">
+              <div className="stat__label">YES token</div>
+              <div className="stat__value" style={{ fontSize: 13 }}><CopyChip value={yesToken} label={truncateAddress(yesToken)} /></div>
+              <div className="stat__sub">{yesIsCurrency0 ? "currency0" : "currency1"}</div>
+            </div>
+            <div className="stat">
+              <div className="stat__label">NO token</div>
+              <div className="stat__value" style={{ fontSize: 13 }}><CopyChip value={noToken} label={truncateAddress(noToken)} /></div>
+              <div className="stat__sub">{yesIsCurrency0 ? "currency1" : "currency0"}</div>
+            </div>
+            <div className="stat">
+              <div className="stat__label">Request id</div>
+              <div className="stat__value">{requestId > 0n ? requestId.toString() : "—"}</div>
+              <div className="stat__sub">latest resolution request</div>
+            </div>
+          </div>
+        </section>
+
+        {statusNum === 1 && <ResolveButton marketId={marketId} modelId={Number(modelId)} />}
+
+        {statusNum === 2 && (
+          <div className="banner banner--warn">
+            <Icon name="refresh" size={14} />
+            The AI fulfiller has picked this market up. The reasoning CID and final choice will appear after fulfillment.
+          </div>
+        )}
+
+        {statusNum === 3 && (
+          <section className="panel">
+            <div className="panel__head">
+              <span className="panel__title">Resolution</span>
+              <StatusTag status={statusNum} winningChoice={Number(winningChoice)} />
+            </div>
+            <div className="panel__body col gap-3">
+              <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+                Final outcome: <span className="font-mono" style={{ color: "var(--text-primary)" }}>{outcome}</span>
+              </p>
+              {request?.reasoningCid ? (
+                <Link href={`/proofs/${request.reasoningCid}`} className="btn btn--primary" style={{ width: "fit-content" }}>
+                  View AI reasoning trail <Icon name="arrow" size={13} />
+                </Link>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>Resolution CID is not available yet.</p>
+              )}
+            </div>
+          </section>
         )}
       </div>
 
       <aside>
-        <TradePanel
-          marketId={marketId}
-          yesToken={yesToken}
-          noToken={noToken}
-          status={statusNum}
-          statusLabel={MARKET_STATUS_LABEL[statusNum] ?? "UNKNOWN"}
-        />
+        <TradePanel marketId={marketId} yesToken={yesToken} noToken={noToken} status={statusNum} />
       </aside>
     </div>
   );
