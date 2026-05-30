@@ -53,7 +53,9 @@ type ChatCompletionResponse = {
 type ChatCompletionBody = {
   model: string;
   max_tokens: number;
+  temperature: number;
   tools: ReturnType<typeof toOpenAiTool>[];
+  tool_choice?: "auto" | "required" | "none";
   messages: ChatMessage[];
 };
 
@@ -147,7 +149,11 @@ export async function runWithTools(
     const response = await chatComplete(cfg, {
       model: modelName,
       max_tokens: 1024,
+      temperature: 0,
       tools,
+      // Force evidence-gathering on the first turn so the model cannot shortcut
+      // to an unverified INVALID; let it finalize freely afterwards.
+      tool_choice: iter === 0 ? "required" : "auto",
       messages
     });
 
