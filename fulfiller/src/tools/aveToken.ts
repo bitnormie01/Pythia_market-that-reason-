@@ -48,11 +48,6 @@ const slot0Abi = parseAbi([
   "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 a, uint16 b, uint16 c, uint8 d, bool e)"
 ]);
 
-function isXlayer(chain: string): boolean {
-  const c = chain.trim().toLowerCase();
-  return c === "xlayer" || c === "x-layer" || c === "okx" || c === "okc" || c === "196";
-}
-
 async function readOnchainPrice(
   cfg: Config,
   src: OnchainPriceSource,
@@ -87,7 +82,12 @@ async function readOnchainPrice(
 }
 
 export async function callAveToken(cfg: Config, input: AveTokenInput): Promise<AveTokenResult> {
-  const src = isXlayer(input.chain) ? XLAYER_PRICE_SOURCES[input.address.trim().toLowerCase()] : undefined;
+  // Match the canonical on-chain price source by token address alone. The model
+  // sometimes passes an unrecognized chain string ("X Layer", "Xlayer", etc.) and
+  // sometimes drops the 0x prefix; gating on either caused false INVALIDs that
+  // burn the creator bond. Normalize to lowercase 0x-prefixed before lookup.
+  const normalizedAddress = "0x" + (input.address ?? "").trim().toLowerCase().replace(/^0x/, "");
+  const src = XLAYER_PRICE_SOURCES[normalizedAddress];
   if (src) {
     try {
       return await readOnchainPrice(cfg, src, input.address);

@@ -48,12 +48,13 @@ const LABELS = ["YES", "NO", "INVALID"];
 const now = Math.floor(Date.now() / 1000);
 const expiry = now - 120;
 
-const OKB = "OKB is the token WOKB at 0xe538905cf8410324e03A5A23C1c177a474D59b2b on X Layer (chain 'xlayer').";
+// FINAL locked hero-market question (byte-for-byte what goes on-chain).
+const HERO_QUESTION =
+  "Will OKB (X Layer WOKB, token 0xe538905cf8410324e03A5A23C1c177a474D59b2b, chain 'xlayer') trade above $20 in USDT when this market resolves?";
 const questions: Record<string, string> = {
-  P_okb_above_20_expectYES: `Will OKB trade above $20 in USDT at the time this market resolves? ${OKB}`,
-  P_okb_above_500_expectNO: `Will OKB trade above $500 in USDT at the time this market resolves? ${OKB}`
+  HERO_final_expectYES: HERO_QUESTION
 };
-const REPEAT = 3;
+const REPEAT = 5;
 
 async function main() {
   if (!cfg.dgridApiKey) {

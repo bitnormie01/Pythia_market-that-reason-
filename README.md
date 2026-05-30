@@ -136,6 +136,7 @@ For a full local end-to-end against a forked X Layer mainnet, see `docs/superpow
 - **96 / 96** Solidity unit tests passing under `forge test`
 - **30 / 30** TypeScript unit tests passing under `vitest`
 - **Fork E2E on X Layer mainnet state** (May 26 2026): deploy → request → DGrid resolve → Pinata pin → fulfill → `RESOLVED` → redeem math verified
+- **Live-bytecode hero-market rehearsal** (`test/fork/HeroMarketRehearsal.t.sol`): the full create → trade → AI-resolve → recover flow run against the **actually-deployed mainnet contracts** on an X Layer fork. A real `beforeSwap` fires on the buy, the AI path drives the market to `RESOLVED`, and the creator recovers bond + seed for a **net cost of 0.000001 USDT** — proving the hook is real-transaction-ready and the live run is capital-recoverable
 - **Failure-mode E2E** validated separately: with intentionally-misconfigured Pinata, the full refund cascade fired correctly and left the market in a clean `TRADING` state with all counters reset
 
 ---
