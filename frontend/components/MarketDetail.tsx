@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { useReadContract, useWatchContractEvent } from "wagmi";
 
 import ResolveButton from "@/components/ResolveButton";
 import { ShareButton, type Outcome } from "@/components/ShareButton";
 import TradePanel from "@/components/TradePanel";
-import { CopyChip, Icon, StatusTag, Tag } from "@/components/ui";
+import { CopyChip, Icon, ProbBar, ProbSplit, StatusTag, Tag } from "@/components/ui";
+import { useMarketProbabilities } from "@/hooks/useMarkets";
 import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
 import { ADDRESSES } from "@/lib/contracts";
@@ -69,6 +71,16 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
     args: [requestId],
     query: { enabled: requestId > 0n }
   });
+
+  const marketTuple = marketQuery.data as unknown as MarketTuple | undefined;
+  const yesTokenTop = marketTuple?.[7];
+  const noTokenTop = marketTuple?.[8];
+  const probMarkets = useMemo(
+    () => (yesTokenTop && noTokenTop ? [{ id: marketId, yesToken: yesTokenTop, noToken: noTokenTop }] : []),
+    [marketId, yesTokenTop, noTokenTop]
+  );
+  const { probabilities } = useMarketProbabilities(probMarkets);
+  const yesProb = probabilities.get(marketId.toString()) ?? null;
 
   useWatchContractEvent({
     address: ADDRESSES.hook,
@@ -156,6 +168,25 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
           </div>
         </section>
 
+        {yesProb !== null && (
+          <section className="panel">
+            <div className="panel__head">
+              <span className="panel__title">Implied probability</span>
+              <Tag variant="neutral">live pool read</Tag>
+            </div>
+            <div className="panel__body col gap-2">
+              <ProbBar yes={yesProb} />
+              <div className="row between gap-2" style={{ fontSize: 13 }}>
+                <span className="muted">YES / NO odds</span>
+                <ProbSplit yes={yesProb} />
+              </div>
+              <p className="field__hint" style={{ margin: 0 }}>
+                1 YES ≈ {yesProb.toFixed(2)} USDT, 1 NO ≈ {(1 - yesProb).toFixed(2)} USDT right now — each share pays out 1 USDT if it wins. Read live from the v4 pool reserves, updates within seconds of every trade.
+              </p>
+            </div>
+          </section>
+        )}
+
         <section className="panel">
           <div className="panel__head">
             <span className="panel__title">Market state</span>
@@ -212,7 +243,7 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
       </div>
 
       <aside>
-        <TradePanel marketId={marketId} yesToken={yesToken} noToken={noToken} status={statusNum} />
+        <TradePanel marketId={marketId} yesToken={yesToken} noToken={noToken} status={statusNum} yesProb={yesProb} />
       </aside>
     </div>
   );

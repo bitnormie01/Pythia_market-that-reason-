@@ -293,6 +293,9 @@ button, input, select, textarea { font: inherit; }
 .tag--pulse::before { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
 
+.spin { animation: spin 0.8s linear infinite; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .segmented {
   display: inline-flex;
   padding: 2px;

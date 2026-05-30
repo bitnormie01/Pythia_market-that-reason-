@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { erc20Abi } from "viem";
 import { useReadContract, useReadContracts } from "wagmi";
 
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
@@ -100,4 +101,71 @@ export function useMarketSummaries(ids: bigint[] | readonly bigint[] | undefined
   }, [idList, query.data]);
 
   return { ...query, summaries };
+}
+
+/**
+ * Live implied YES probability for each market, read straight from the v4 pool.
+ *
+ * In this binary AMM a YES+NO pair always mints/redeems for 1 USDT, so
+ * price(YES) + price(NO) = 1 and the marginal exchange rate is reserveNO/reserveYES.
+ * Solving gives price(YES) = reserveNO / (reserveYES + reserveNO). The pool's reserves
+ * are simply the outcome-token balances held by the singleton PoolManager (each outcome
+ * token is unique to one pool, so balanceOf(poolManager) is that pool's reserve).
+ *
+ * Returns a Map keyed by market id string → YES probability in [0,1], or null when the
+ * pool has no liquidity / the read failed. Polls so cards reflect trades within seconds.
+ */
+export function useMarketProbabilities(
+  markets: { id: bigint; yesToken: `0x${string}`; noToken: `0x${string}` }[] | readonly MarketSummary[]
+) {
+  const list = useMemo(
+    () => markets.map((m) => ({ id: m.id, yesToken: m.yesToken, noToken: m.noToken })),
+    [markets]
+  );
+
+  const contracts = useMemo(
+    () =>
+      list.flatMap((m) => [
+        {
+          address: m.yesToken,
+          abi: erc20Abi,
+          functionName: "balanceOf" as const,
+          args: [ADDRESSES.poolManager] as const
+        },
+        {
+          address: m.noToken,
+          abi: erc20Abi,
+          functionName: "balanceOf" as const,
+          args: [ADDRESSES.poolManager] as const
+        }
+      ]),
+    [list]
+  );
+
+  const query = useReadContracts({
+    contracts,
+    allowFailure: true,
+    query: { enabled: list.length > 0, refetchInterval: 12_000 }
+  });
+
+  const probabilities = useMemo(() => {
+    const data = query.data ?? [];
+    const map = new Map<string, number | null>();
+    list.forEach((m, i) => {
+      const yesRes = data[i * 2];
+      const noRes = data[i * 2 + 1];
+      if (yesRes?.status === "success" && noRes?.status === "success") {
+        const reserveYes = yesRes.result as bigint;
+        const reserveNo = noRes.result as bigint;
+        const denom = reserveYes + reserveNo;
+        // basis-point division keeps full precision on 18-decimal bigints
+        map.set(m.id.toString(), denom > 0n ? Number((reserveNo * 10_000n) / denom) / 10_000 : null);
+      } else {
+        map.set(m.id.toString(), null);
+      }
+    });
+    return map;
+  }, [list, query.data]);
+
+  return { probabilities, ...query };
 }

@@ -89,6 +89,10 @@ export function Logo({ size = 24 }: { size?: number }) {
   );
 }
 
+export function Spinner({ size = 14 }: { size?: number }) {
+  return <Icon name="refresh" size={size} className="spin" />;
+}
+
 export function Tag({
   children,
   variant = "neutral",

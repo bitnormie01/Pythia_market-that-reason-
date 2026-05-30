@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { erc20Abi, keccak256, maxUint256, parseUnits, toBytes } from "viem";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { erc20Abi, keccak256, maxUint256, parseEventLogs, parseUnits, toBytes } from "viem";
 import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { toast } from "sonner";
 
-import { Icon, Tag } from "@/components/ui";
+import { Icon, Spinner, Tag } from "@/components/ui";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
 import { ADDRESSES, USDT_DECIMALS } from "@/lib/contracts";
 
@@ -18,8 +19,10 @@ const QUESTION_FORBIDDEN = /[<>[\]{}]/;
 const SUPPORTED_MODEL_ID = 0;
 
 export default function CreateMarketForm() {
+  const router = useRouter();
   const { address } = useAccount();
   const [step, setStep] = useState<1 | 2>(1);
+  const [action, setAction] = useState<"idle" | "approving" | "creating">("idle");
   const [question, setQuestion] = useState("");
   const [expiry, setExpiry] = useState("");
   const [modelId, setModelId] = useState(0);
@@ -45,6 +48,43 @@ export default function CreateMarketForm() {
     query: { enabled: !!address }
   });
 
+  // The allowance read is cached; without an explicit refetch the UI keeps showing
+  // "Approve USDT" until React Query's lazy stale window fires. Refetch as soon as the
+  // approval tx mines so the form advances to "Create market" immediately.
+  useEffect(() => {
+    if (receipt.isSuccess && action === "approving") {
+      void usdtAllowance.refetch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receipt.isSuccess, action]);
+
+  // When the createMarket tx mines, pull the new marketId out of the MarketCreated log
+  // and route straight to its page. Without this the form just re-rendered the review
+  // screen, so a successful creation looked like nothing happened. We only navigate when
+  // a MarketCreated log is actually present, so a stale approval receipt can't trigger it.
+  useEffect(() => {
+    if (action !== "creating" || !receipt.isSuccess || !receipt.data) return;
+    try {
+      const logs = parseEventLogs({
+        abi: PythiaHookAbi,
+        eventName: "MarketCreated",
+        logs: receipt.data.logs
+      });
+      const mine =
+        logs.find(
+          (l) => (l.args.creator as string | undefined)?.toLowerCase() === address?.toLowerCase()
+        ) ?? logs[0];
+      const id = mine?.args.marketId;
+      if (id !== undefined) {
+        toast.success(`Market #${id.toString()} created`);
+        router.push(`/markets/${id.toString()}`);
+      }
+    } catch {
+      // No MarketCreated log on this receipt — leave the user on the review screen.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action, receipt.isSuccess, receipt.data]);
+
   const selectedTools = useMemo(() => TOOL_NAMES.filter((name) => tools[name]), [tools]);
   const toolHashes = selectedTools.map((name) => TOOL_HASH_BY_NAME[name]);
   const hasForbidden = QUESTION_FORBIDDEN.test(question);
@@ -59,9 +99,19 @@ export default function CreateMarketForm() {
   const totalUsdtNeeded = initialUsdt + bondValue;
   const allowanceValue = (usdtAllowance.data as bigint | undefined) ?? 0n;
   const needsApproval = !!address && totalUsdtNeeded > allowanceValue;
-  const isConfirming = isPending || receipt.isLoading;
+  const txConfirming = isPending || receipt.isLoading;
+  // "approving" stays true through tx mining, the allowance refetch, and the brief
+  // window where the receipt has landed but the fresh allowance hasn't propagated yet.
+  const approving =
+    action === "approving" &&
+    (txConfirming || usdtAllowance.isFetching || (receipt.isSuccess && needsApproval));
+  // Keep the "Deploying market…" spinner up through mining AND the post-success
+  // navigation so the button never flickers back to its idle label.
+  const creating = action === "creating" && (txConfirming || receipt.isSuccess);
+  const busy = approving || creating;
 
   function approveUsdt() {
+    setAction("approving");
     writeContract(
       {
         address: ADDRESSES.usdt,
@@ -71,7 +121,10 @@ export default function CreateMarketForm() {
       },
       {
         onSuccess: () => toast.success("USDT approval submitted"),
-        onError: (err) => toast.error(err.message.slice(0, 240))
+        onError: (err) => {
+          setAction("idle");
+          toast.error(err.message.slice(0, 240));
+        }
       }
     );
   }
@@ -126,6 +179,7 @@ export default function CreateMarketForm() {
   function submitMarket() {
     const expiryTs = validate();
     if (expiryTs === null) return;
+    setAction("creating");
     writeContract(
       {
         address: ADDRESSES.hook,
@@ -135,7 +189,10 @@ export default function CreateMarketForm() {
       },
       {
         onSuccess: () => toast.success("Market submitted"),
-        onError: (err) => toast.error(err.message.slice(0, 240))
+        onError: (err) => {
+          setAction("idle");
+          toast.error(err.message.slice(0, 240));
+        }
       }
     );
   }
@@ -186,14 +243,34 @@ export default function CreateMarketForm() {
           </div>
         </section>
 
-        {needsApproval && (
-          <button type="button" onClick={approveUsdt} disabled={isConfirming} className="btn btn--full">
-            {isConfirming ? "Confirming..." : "1) Approve USDT"}
+        {approving && (
+          <div className="banner banner--info">
+            <Spinner size={14} />
+            <span>
+              {txConfirming
+                ? "Approving USDT — confirm in your wallet, then waiting for the transaction…"
+                : "Approval confirmed — checking allowance…"}
+            </span>
+          </div>
+        )}
+
+        {needsApproval ? (
+          <button type="button" onClick={approveUsdt} disabled={busy} className="btn btn--primary btn--full btn--lg">
+            {approving ? (
+              <><Spinner size={14} /> Approving USDT…</>
+            ) : (
+              "1) Approve USDT"
+            )}
+          </button>
+        ) : (
+          <button type="button" onClick={submitMarket} disabled={busy || !address} className="btn btn--primary btn--full btn--lg">
+            {creating ? (
+              <><Spinner size={14} /> Deploying market…</>
+            ) : (
+              "Create market"
+            )}
           </button>
         )}
-        <button type="button" onClick={submitMarket} disabled={isConfirming || !address || needsApproval} className="btn btn--primary btn--full btn--lg">
-          {isConfirming ? "Deploying market..." : "Create market"}
-        </button>
       </div>
     );
   }

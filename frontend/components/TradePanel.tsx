@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { erc20Abi, formatUnits, maxUint256, parseUnits } from "viem";
 import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { toast } from "sonner";
 
+import { Spinner } from "@/components/ui";
 import { OutcomeTokenAbi } from "@/lib/abi/OutcomeToken";
 import { PythiaPeripheryAbi } from "@/lib/abi/PythiaPeriphery";
 import { ADDRESSES, USDT_DECIMALS } from "@/lib/contracts";
@@ -19,17 +20,20 @@ export default function TradePanel({
   marketId,
   yesToken,
   noToken,
-  status
+  status,
+  yesProb = null
 }: {
   marketId: bigint;
   yesToken: `0x${string}`;
   noToken: `0x${string}`;
   status: number;
+  yesProb?: number | null;
 }) {
   const { address } = useAccount();
   const [side, setSide] = useState<Side>("YES");
   const [mode, setMode] = useState<Mode>("BUY");
   const [amount, setAmount] = useState("10");
+  const [action, setAction] = useState<"idle" | "approving" | "trading">("idle");
 
   const usdtAllowance = useReadContract({
     address: ADDRESSES.usdt,
@@ -53,23 +57,43 @@ export default function TradePanel({
     abi: OutcomeTokenAbi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
-    query: { enabled: !!address && mode === "SELL" }
+    query: { enabled: !!address }
   });
 
   const { writeContract, isPending, data: pendingHash } = useWriteContract();
   const receipt = useWaitForTransactionReceipt({ hash: pendingHash });
 
-  function notify(action: string) {
-    toast.success(`${action} submitted`);
+  // Allowance/balance reads are cached and never refetch on their own after a tx mines,
+  // which made the panel keep showing "Approve" forever. Refetch the relevant data the
+  // instant a tx mines. The ref dedupes so a stale receipt (e.g. the approval receipt
+  // still lingering for one render after the user clicks Buy) can't fire the wrong branch.
+  const processedTx = useRef<`0x${string}` | undefined>(undefined);
+  useEffect(() => {
+    if (!receipt.isSuccess || !pendingHash || processedTx.current === pendingHash) return;
+    processedTx.current = pendingHash;
+    if (action === "approving") {
+      if (mode === "BUY") void usdtAllowance.refetch();
+      else void outcomeAllowance.refetch();
+    } else if (action === "trading") {
+      void outcomeBalance.refetch();
+      setAction("idle");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receipt.isSuccess, pendingHash]);
+
+  function notify(label: string) {
+    toast.success(`${label} submitted`);
   }
 
   function notifyError(err: unknown) {
+    setAction("idle");
     const msg = err instanceof Error ? err.message : String(err);
     toast.error(msg.slice(0, 240));
   }
 
   function approveUsdt() {
     if (!address) return;
+    setAction("approving");
     writeContract(
       {
         address: ADDRESSES.usdt,
@@ -86,6 +110,7 @@ export default function TradePanel({
 
   function approveOutcome() {
     if (!address) return;
+    setAction("approving");
     writeContract(
       {
         address: outcomeToken,
@@ -117,6 +142,7 @@ export default function TradePanel({
       return;
     }
     const minOut = (usdtIn * (10_000n - SLIPPAGE_BPS)) / 10_000n;
+    setAction("trading");
     writeContract(
       {
         address: ADDRESSES.periphery,
@@ -147,6 +173,7 @@ export default function TradePanel({
       toast.error("Amount must be > 0");
       return;
     }
+    setAction("trading");
     writeContract(
       {
         address: ADDRESSES.periphery,
@@ -187,7 +214,27 @@ export default function TradePanel({
       }
     })();
 
-  const isConfirming = isPending || receipt.isLoading;
+  const needsApproval = mode === "BUY" ? needsUsdtApproval : needsOutcomeApproval;
+  const approvalFetching = mode === "BUY" ? usdtAllowance.isFetching : outcomeAllowance.isFetching;
+  const txConfirming = isPending || receipt.isLoading;
+  // "approving" stays true through tx mining, the allowance refetch, and the brief window
+  // where the receipt landed but the fresh allowance hasn't propagated yet.
+  const approving =
+    action === "approving" &&
+    (txConfirming || approvalFetching || (receipt.isSuccess && needsApproval));
+  const trading = action === "trading" && txConfirming;
+  const busy = approving || trading;
+
+  // Live price of the selected side and a pre-impact estimate of shares received. This is
+  // what explains "1 USDT → 1.8 shares": a share priced at $0.55 means 1 USDT buys ~1.8 of
+  // them, and each redeems for 1 USDT only if that side wins.
+  const sidePrice = yesProb === null ? null : side === "YES" ? yesProb : 1 - yesProb;
+  const amountNum = Number(amount);
+  const estTokens =
+    mode === "BUY" && sidePrice !== null && sidePrice > 0 && Number.isFinite(amountNum) && amountNum > 0
+      ? amountNum / sidePrice
+      : null;
+  const heldBalance = outcomeBalance.data as bigint | undefined;
 
   if (status !== 0) {
     return (
@@ -217,38 +264,67 @@ export default function TradePanel({
           <button className={`btn btn--full ${side === "NO" ? "btn--no" : ""}`} onClick={() => setSide("NO")}>NO</button>
         </div>
 
+        {yesProb !== null && (
+          <div className="row between gap-2" style={{ fontSize: 12 }}>
+            <span className="muted">Pool odds</span>
+            <span className="font-mono">{`YES $${yesProb.toFixed(2)} · NO $${(1 - yesProb).toFixed(2)}`}</span>
+          </div>
+        )}
+
         <div className="field">
           <label className="field__label">
             <span>{mode === "BUY" ? "Spend (USDT)" : `Sell ${side} (units)`}</span>
           </label>
           <input className="input" type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          {mode === "SELL" && outcomeBalance.data !== undefined && (
-            <div className="field__hint">Balance: {formatUnits((outcomeBalance.data as bigint) ?? 0n, 18)} {side}</div>
+          {heldBalance !== undefined && (
+            <div className="field__hint">You hold {Number(formatUnits(heldBalance, 18)).toFixed(3)} {side}</div>
+          )}
+          {estTokens !== null && (
+            <div className="field__hint">≈ {estTokens.toFixed(3)} {side} before price impact · each {side} pays 1 USDT if it wins</div>
           )}
         </div>
 
-        {mode === "BUY" && needsUsdtApproval && (
-          <button onClick={approveUsdt} disabled={isConfirming} className="btn btn--full">
-            {isConfirming ? "Confirming..." : "1) Approve USDT"}
-          </button>
+        {approving && (
+          <div className="banner banner--info">
+            <Spinner size={14} />
+            <span>
+              {txConfirming
+                ? "Approving — confirm in your wallet, then waiting for the transaction…"
+                : "Approval confirmed — checking allowance…"}
+            </span>
+          </div>
         )}
 
-        {mode === "SELL" && needsOutcomeApproval && (
-          <button onClick={approveOutcome} disabled={isConfirming} className="btn btn--full">
-            {isConfirming ? "Confirming..." : `1) Approve ${side}`}
+        {needsApproval ? (
+          <button
+            onClick={mode === "BUY" ? approveUsdt : approveOutcome}
+            disabled={busy}
+            className="btn btn--primary btn--full btn--lg"
+          >
+            {approving ? (
+              <><Spinner size={14} /> Approving {mode === "BUY" ? "USDT" : side}…</>
+            ) : (
+              `1) Approve ${mode === "BUY" ? "USDT" : side}`
+            )}
+          </button>
+        ) : (
+          <button
+            onClick={mode === "BUY" ? onBuy : onSell}
+            disabled={busy || !address}
+            className="btn btn--primary btn--full btn--lg"
+          >
+            {trading ? (
+              <><Spinner size={14} /> {mode === "BUY" ? "Buying" : "Selling"} {side}…</>
+            ) : (
+              `${mode === "BUY" ? "Buy" : "Sell"} ${side}`
+            )}
           </button>
         )}
-
-        <button
-          onClick={mode === "BUY" ? onBuy : onSell}
-          disabled={isConfirming || !address || (mode === "BUY" ? needsUsdtApproval : needsOutcomeApproval)}
-          className="btn btn--primary btn--full btn--lg"
-        >
-          {isConfirming ? "Confirming..." : `${mode === "BUY" ? "Buy" : "Sell"} ${side}`}
-        </button>
 
         <p className="field__hint">
-          Uses PythiaPeriphery for atomic mint/swap or swap/burn. Quoter-based slippage is deferred.
+          Buy mints a YES+NO pair (1 USDT) and swaps the unwanted leg through the v4 pool — so 1 USDT buys
+          more than one share whenever a side trades below $1, and each winning share redeems for 1 USDT.
+          Sell does the reverse via PythiaPeriphery. MVP slippage 50%.
         </p>
       </div>
     </section>

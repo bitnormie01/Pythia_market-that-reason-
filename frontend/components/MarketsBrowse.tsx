@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 
 import { MarketCard } from "@/components/MarketCard";
 import { EmptyState, Icon, ProbSplit, StatusTag } from "@/components/ui";
-import { useMarketIds, useMarketSummaries, type MarketSummary } from "@/hooks/useMarkets";
+import { useMarketIds, useMarketProbabilities, useMarketSummaries, type MarketSummary } from "@/hooks/useMarkets";
 import { ADDRESSES } from "@/lib/contracts";
 import { formatExpiryParts, truncateAddress } from "@/lib/format";
 
@@ -29,6 +29,7 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
   const idsQuery = useMarketIds(0, limit);
   const idArray = (idsQuery.data ?? []) as readonly bigint[];
   const { summaries, isLoading: summariesLoading } = useMarketSummaries(idArray);
+  const { probabilities } = useMarketProbabilities(summaries);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -165,12 +166,13 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
           <EmptyState icon="search" title="No markets match" hint="Try a different search term or status filter." />
         </div>
       ) : view === "table" && !compact ? (
-        <MarketsTable rows={visible} />
+        <MarketsTable rows={visible} probabilities={probabilities} />
       ) : (
         <div className="market-grid">
           {visible.map((m) => (
             <MarketCard
               key={m.id.toString()}
+              yes={probabilities.get(m.id.toString()) ?? null}
               data={{
                 id: m.id,
                 question: m.question,
@@ -188,14 +190,14 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
       {!compact && (
         <div className="banner">
           <Icon name="shield" size={14} />
-          Market list uses verified PythiaHook reads. Volume, liquidity, and implied probability are intentionally hidden until an indexer is connected.
+          Implied probability is read live from each v4 pool&apos;s reserves. Volume and historical liquidity stay hidden until an indexer is connected.
         </div>
       )}
     </div>
   );
 }
 
-function MarketsTable({ rows }: { rows: MarketSummary[] }) {
+function MarketsTable({ rows, probabilities }: { rows: MarketSummary[]; probabilities: Map<string, number | null> }) {
   return (
     <div className="panel table-wrap">
       <table className="table">
@@ -213,17 +215,18 @@ function MarketsTable({ rows }: { rows: MarketSummary[] }) {
         <tbody>
           {rows.map((m) => {
             const expiry = formatExpiryParts(m.expiry);
+            const yes = probabilities.get(m.id.toString()) ?? null;
             return (
               <tr key={m.id.toString()} onClick={() => { window.location.href = `/markets/${m.id.toString()}`; }}>
                 <td><span className="font-mono muted">{m.id.toString().padStart(3, "0")}</span></td>
                 <td>
                   <div className="col gap-1" style={{ maxWidth: 520 }}>
                     <span className="line-clamp-2">{m.question}</span>
-                    <ProbSplit />
+                    <ProbSplit yes={yes} />
                   </div>
                 </td>
                 <td><StatusTag status={m.effectiveStatus} winningChoice={m.winningChoice} /></td>
-                <td style={{ textAlign: "right" }}><span className="muted font-mono">not indexed</span></td>
+                <td style={{ textAlign: "right" }}><ProbSplit yes={yes} /></td>
                 <td style={{ textAlign: "right" }}><span className="font-mono muted">{truncateAddress(m.creator)}</span></td>
                 <td style={{ textAlign: "right" }}>
                   <div className="col" style={{ alignItems: "flex-end", gap: 1 }}>

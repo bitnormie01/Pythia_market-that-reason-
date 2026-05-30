@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { ProbBar, StatusTag } from "@/components/ui";
+import { ProbBar, ProbSplit, StatusTag } from "@/components/ui";
 import { formatExpiryParts, truncateAddress } from "@/lib/format";
 
 export type MarketCardData = {
@@ -15,7 +15,7 @@ export type MarketCardData = {
   winningChoice?: number;
 };
 
-export function MarketCard({ data }: { data: MarketCardData }) {
+export function MarketCard({ data, yes = null }: { data: MarketCardData; yes?: number | null }) {
   const expiry = formatExpiryParts(data.expiry);
   return (
     <Link href={`/markets/${data.id.toString()}`} className="market-card col between">
@@ -32,10 +32,10 @@ export function MarketCard({ data }: { data: MarketCardData }) {
       </div>
 
       <div className="col gap-2" style={{ marginTop: 18 }}>
-        <ProbBar />
+        <ProbBar yes={yes} />
         <div className="row between gap-2" style={{ fontSize: 12 }}>
-          <span className="muted">Probability not indexed</span>
-          <span className="font-mono muted">— / —</span>
+          <span className="muted">{yes === null ? "Awaiting liquidity" : "Implied YES / NO"}</span>
+          <ProbSplit yes={yes} />
         </div>
         <div className="row between gap-2" style={{ paddingTop: 6, borderTop: "1px solid var(--border)", fontSize: 12 }}>
           <div className="col">
