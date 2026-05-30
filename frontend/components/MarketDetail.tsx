@@ -7,7 +7,7 @@ import { useReadContract, useWatchContractEvent } from "wagmi";
 import ResolveButton from "@/components/ResolveButton";
 import { ShareButton, type Outcome } from "@/components/ShareButton";
 import TradePanel from "@/components/TradePanel";
-import { CopyChip, Icon, ProbBar, ProbSplit, StatusTag, Tag } from "@/components/ui";
+import { CopyChip, Icon, ProbBar, StatusTag, Tag } from "@/components/ui";
 import { useMarketProbabilities } from "@/hooks/useMarkets";
 import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
@@ -174,12 +174,17 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
               <span className="panel__title">Implied probability</span>
               <Tag variant="neutral">live pool read</Tag>
             </div>
-            <div className="panel__body col gap-2">
-              <ProbBar yes={yesProb} />
-              <div className="row between gap-2" style={{ fontSize: 13 }}>
-                <span className="muted">YES / NO odds</span>
-                <ProbSplit yes={yesProb} />
+            <div className="panel__body col gap-3">
+              <div className="prob-hero">
+                <span className="prob-hero__main">
+                  <span className="prob-hero__label">YES</span>
+                  <span className="prob-hero__value" style={{ fontSize: 40 }}>{Math.round(yesProb * 100)}%</span>
+                </span>
+                <span className="prob-hero__no" style={{ fontSize: 15 }}>
+                  NO <b>{100 - Math.round(yesProb * 100)}%</b>
+                </span>
               </div>
+              <ProbBar yes={yesProb} />
               <p className="field__hint" style={{ margin: 0 }}>
                 1 YES ≈ {yesProb.toFixed(2)} USDT, 1 NO ≈ {(1 - yesProb).toFixed(2)} USDT right now — each share pays out 1 USDT if it wins. Read live from the v4 pool reserves, updates within seconds of every trade.
               </p>
@@ -221,18 +226,28 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
         )}
 
         {statusNum === 3 && (
-          <section className="panel">
+          <section className="panel" style={{ borderColor: "var(--accent-border)" }}>
             <div className="panel__head">
-              <span className="panel__title">Resolution</span>
+              <span className="panel__title">AI resolution</span>
               <StatusTag status={statusNum} winningChoice={Number(winningChoice)} />
             </div>
             <div className="panel__body col gap-3">
-              <p style={{ margin: 0, color: "var(--text-secondary)" }}>
-                Final outcome: <span className="font-mono" style={{ color: "var(--text-primary)" }}>{outcome}</span>
+              <div className="row gap-2" style={{ alignItems: "center" }}>
+                <span className="empty-state__icon" style={{ width: 40, height: 40, borderColor: "var(--accent-border)" }}>
+                  <Icon name="reasoning" size={20} />
+                </span>
+                <div className="col">
+                  <span className="muted" style={{ fontSize: 12 }}>Final outcome</span>
+                  <span className="font-mono" style={{ color: "var(--text-primary)", fontSize: 18, fontWeight: 600 }}>{outcome}</span>
+                </div>
+              </div>
+              <p className="field__hint" style={{ margin: 0 }}>
+                This market was resolved by AI. The full prompt, tool calls, response hashes, and final reasoning are
+                published to IPFS so anyone can audit how the outcome was reached.
               </p>
               {request?.reasoningCid ? (
-                <Link href={`/proofs/${request.reasoningCid}`} className="btn btn--primary" style={{ width: "fit-content" }}>
-                  View AI reasoning trail <Icon name="arrow" size={13} />
+                <Link href={`/proofs/${request.reasoningCid}`} className="btn btn--primary btn--lg" style={{ width: "fit-content" }}>
+                  <Icon name="reasoning" size={15} /> View AI reasoning trail <Icon name="arrow" size={14} />
                 </Link>
               ) : (
                 <p className="muted" style={{ margin: 0 }}>Resolution CID is not available yet.</p>

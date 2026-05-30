@@ -19,11 +19,14 @@ type IconName =
   | "grid"
   | "info"
   | "lock"
+  | "moon"
   | "plus"
+  | "reasoning"
   | "refresh"
   | "search"
   | "shield"
   | "spark"
+  | "sun"
   | "wallet"
   | "x";
 
@@ -52,11 +55,14 @@ export function Icon({
     grid: <path d="M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z" />,
     info: <><circle cx="8" cy="8" r="6" /><path d="M8 7v4M8 5h.01" /></>,
     lock: <><rect x="3" y="7" width="10" height="7" rx="1" /><path d="M5 7V5a3 3 0 0 1 6 0v2" /></>,
+    moon: <path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5 5.5 5.5 0 1 0 13.5 9.5Z" />,
     plus: <path d="M8 3v10M3 8h10" />,
+    reasoning: <><path d="M8 1.5a4 4 0 0 1 2.5 7.1c-.4.3-.6.8-.6 1.3v.6H6.1v-.6c0-.5-.2-1-.6-1.3A4 4 0 0 1 8 1.5Z" /><path d="M6.3 13h3.4M6.8 14.5h2.4" /></>,
     refresh: <><path d="M13 8a5 5 0 0 1-9 3.5L3 13" /><path d="M3 8a5 5 0 0 1 9-3.5L13 3" /><path d="M13 3v3h-3M3 13v-3h3" /></>,
     search: <><circle cx="7" cy="7" r="4" /><path d="m10 10 3 3" /></>,
     shield: <path d="M8 2 3 4v4c0 3 2.5 5 5 6 2.5-1 5-3 5-6V4L8 2Z" />,
     spark: <path d="m2 12 3-7 3 5 2-3 4 5" />,
+    sun: <><circle cx="8" cy="8" r="3" /><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M13 3l-1 1M4 12l-1 1" /></>,
     wallet: <><rect x="2.5" y="4" width="11" height="9" rx="1" /><path d="M2.5 6.5h11M10.5 9H12" /></>,
     x: <path d="m4 4 8 8M12 4l-8 8" />
   };

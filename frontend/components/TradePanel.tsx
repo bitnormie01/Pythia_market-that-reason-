@@ -260,8 +260,20 @@ export default function TradePanel({
         </div>
 
         <div className="row gap-2">
-          <button className={`btn btn--full ${side === "YES" ? "btn--yes" : ""}`} onClick={() => setSide("YES")}>YES</button>
-          <button className={`btn btn--full ${side === "NO" ? "btn--no" : ""}`} onClick={() => setSide("NO")}>NO</button>
+          <button
+            className={`btn btn--full ${side === "YES" ? "btn--yes" : ""}`}
+            style={side === "YES" ? undefined : { color: "var(--yes)", borderColor: "var(--yes-border)" }}
+            onClick={() => setSide("YES")}
+          >
+            YES
+          </button>
+          <button
+            className={`btn btn--full ${side === "NO" ? "btn--no" : ""}`}
+            style={side === "NO" ? undefined : { color: "var(--no)", borderColor: "var(--no-border)" }}
+            onClick={() => setSide("NO")}
+          >
+            NO
+          </button>
         </div>
 
         {yesProb !== null && (

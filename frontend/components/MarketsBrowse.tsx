@@ -4,14 +4,17 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { MarketCard } from "@/components/MarketCard";
-import { EmptyState, Icon, ProbSplit, StatusTag } from "@/components/ui";
-import { useMarketIds, useMarketProbabilities, useMarketSummaries, type MarketSummary } from "@/hooks/useMarkets";
+import { EmptyState, Icon } from "@/components/ui";
+import {
+  useMarketIds,
+  useMarketProbabilities,
+  useMarketSummaries,
+  useResolvedProofCids
+} from "@/hooks/useMarkets";
 import { ADDRESSES } from "@/lib/contracts";
-import { formatExpiryParts, truncateAddress } from "@/lib/format";
 
 type Filter = "all" | "trading" | "expired" | "resolving" | "resolved";
 type Sort = "new" | "expiry" | "status";
-type View = "table" | "cards";
 
 const FILTER_STATUS: Record<Exclude<Filter, "all">, number> = {
   trading: 0,
@@ -20,16 +23,24 @@ const FILTER_STATUS: Record<Exclude<Filter, "all">, number> = {
   resolved: 3
 };
 
+const FILTERS: Filter[] = ["all", "trading", "expired", "resolving", "resolved"];
+
 export default function MarketsBrowse({ limit = 50, compact = false }: { limit?: number; compact?: boolean }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<Sort>("new");
-  const [view, setView] = useState<View>(compact ? "cards" : "table");
 
   const idsQuery = useMarketIds(0, limit);
   const idArray = (idsQuery.data ?? []) as readonly bigint[];
   const { summaries, isLoading: summariesLoading } = useMarketSummaries(idArray);
   const { probabilities } = useMarketProbabilities(summaries);
+
+  // Resolved-card proof deep-link: gated to resolved ids only (Phase-1 final step).
+  const resolvedIds = useMemo(
+    () => summaries.filter((m) => m.effectiveStatus === 3).map((m) => m.id),
+    [summaries]
+  );
+  const { cids } = useResolvedProofCids(resolvedIds);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -101,61 +112,49 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
     <div className="col gap-4">
       {!compact && (
         <>
-          <div className="panel">
-            <div className="panel-grid">
-              <div className="stat">
-                <div className="stat__label">Open markets</div>
-                <div className="stat__value">{totals.open}</div>
-                <div className="stat__sub">{totals.total} total on-chain</div>
-              </div>
-              <div className="stat">
-                <div className="stat__label">Resolving</div>
-                <div className="stat__value">{totals.resolving}</div>
-                <div className="stat__sub">awaiting AI callback</div>
-              </div>
-              <div className="stat">
-                <div className="stat__label">Resolved</div>
-                <div className="stat__value">{totals.resolved}</div>
-                <div className="stat__sub">proof CID available</div>
-              </div>
-              <div className="stat">
-                <div className="stat__label">Volume / liquidity</div>
-                <div className="stat__value">—</div>
-                <div className="stat__sub">indexer not connected</div>
-              </div>
+          <div className="panel-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+            <div className="stat-card">
+              <div className="stat__label">Open markets</div>
+              <div className="stat__value">{totals.open}</div>
+              <div className="stat__sub">{totals.total} total on-chain</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat__label">Resolving</div>
+              <div className="stat__value">{totals.resolving}</div>
+              <div className="stat__sub">awaiting AI callback</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat__label">Resolved</div>
+              <div className="stat__value">{totals.resolved}</div>
+              <div className="stat__sub">proof CID available</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat__label">Volume / liquidity</div>
+              <div className="stat__value muted">—</div>
+              <div className="stat__sub">indexer not connected</div>
             </div>
           </div>
 
           <div className="row between gap-3" style={{ flexWrap: "wrap" }}>
-            <div className="row gap-2" style={{ flexWrap: "wrap" }}>
-              <div className="segmented">
-                {(["all", "trading", "expired", "resolving", "resolved"] as Filter[]).map((f) => (
-                  <button key={f} className="segmented__btn" data-active={filter === f} onClick={() => setFilter(f)}>
-                    {f === "all" ? "All" : f[0].toUpperCase() + f.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <div style={{ position: "relative", width: 280, maxWidth: "100%" }}>
-                <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-tertiary)" }}>
-                  <Icon name="search" size={14} />
-                </span>
-                <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search question or ID..." style={{ paddingLeft: 32 }} />
-              </div>
+            <div className="pill-row">
+              {FILTERS.map((f) => (
+                <button key={f} type="button" className="pill" data-active={filter === f} onClick={() => setFilter(f)}>
+                  {f === "all" ? "All" : f[0].toUpperCase() + f.slice(1)}
+                </button>
+              ))}
             </div>
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
+              <div style={{ position: "relative", width: 260, maxWidth: "100%" }}>
+                <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--text-tertiary)", pointerEvents: "none" }}>
+                  <Icon name="search" size={14} />
+                </span>
+                <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search question or ID…" style={{ paddingLeft: 34 }} />
+              </div>
               <select className="select" value={sort} onChange={(e) => setSort(e.target.value as Sort)} style={{ width: 160 }}>
                 <option value="new">Sort · newest</option>
                 <option value="expiry">Sort · expiry</option>
                 <option value="status">Sort · status</option>
               </select>
-              <div className="segmented">
-                <button className="segmented__btn" data-active={view === "table"} onClick={() => setView("table")}>
-                  <Icon name="filter" size={12} /> Table
-                </button>
-                <button className="segmented__btn" data-active={view === "cards"} onClick={() => setView("cards")}>
-                  <Icon name="grid" size={12} /> Cards
-                </button>
-              </div>
             </div>
           </div>
         </>
@@ -165,8 +164,6 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
         <div className="panel">
           <EmptyState icon="search" title="No markets match" hint="Try a different search term or status filter." />
         </div>
-      ) : view === "table" && !compact ? (
-        <MarketsTable rows={visible} probabilities={probabilities} />
       ) : (
         <div className="market-grid">
           {visible.map((m) => (
@@ -180,7 +177,8 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
                 status: m.effectiveStatus,
                 creator: m.creator,
                 modelId: m.modelId,
-                winningChoice: m.winningChoice
+                winningChoice: m.winningChoice,
+                reasoningCid: cids.get(m.id.toString())
               }}
             />
           ))}
@@ -193,53 +191,6 @@ export default function MarketsBrowse({ limit = 50, compact = false }: { limit?:
           Implied probability is read live from each v4 pool&apos;s reserves. Volume and historical liquidity stay hidden until an indexer is connected.
         </div>
       )}
-    </div>
-  );
-}
-
-function MarketsTable({ rows, probabilities }: { rows: MarketSummary[]; probabilities: Map<string, number | null> }) {
-  return (
-    <div className="panel table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th style={{ width: 64 }}>#</th>
-            <th>Question</th>
-            <th style={{ width: 150 }}>Status</th>
-            <th style={{ width: 130, textAlign: "right" }}>YES / NO</th>
-            <th style={{ width: 150, textAlign: "right" }}>Creator</th>
-            <th style={{ width: 150, textAlign: "right" }}>Expires</th>
-            <th style={{ width: 36 }} />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((m) => {
-            const expiry = formatExpiryParts(m.expiry);
-            const yes = probabilities.get(m.id.toString()) ?? null;
-            return (
-              <tr key={m.id.toString()} onClick={() => { window.location.href = `/markets/${m.id.toString()}`; }}>
-                <td><span className="font-mono muted">{m.id.toString().padStart(3, "0")}</span></td>
-                <td>
-                  <div className="col gap-1" style={{ maxWidth: 520 }}>
-                    <span className="line-clamp-2">{m.question}</span>
-                    <ProbSplit yes={yes} />
-                  </div>
-                </td>
-                <td><StatusTag status={m.effectiveStatus} winningChoice={m.winningChoice} /></td>
-                <td style={{ textAlign: "right" }}><ProbSplit yes={yes} /></td>
-                <td style={{ textAlign: "right" }}><span className="font-mono muted">{truncateAddress(m.creator)}</span></td>
-                <td style={{ textAlign: "right" }}>
-                  <div className="col" style={{ alignItems: "flex-end", gap: 1 }}>
-                    <span>{expiry.date}</span>
-                    <span className="muted" style={{ fontSize: 11 }}>{expiry.rel}</span>
-                  </div>
-                </td>
-                <td><Icon name="arrow" size={14} className="muted" /></td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }

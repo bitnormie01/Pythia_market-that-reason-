@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { erc20Abi } from "viem";
 import { useReadContract, useReadContracts } from "wagmi";
 
+import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
 import { ADDRESSES } from "@/lib/contracts";
 
@@ -168,4 +169,78 @@ export function useMarketProbabilities(
   }, [list, query.data]);
 
   return { probabilities, ...query };
+}
+
+/**
+ * Resolved-card proof deep-link support. For resolved markets ONLY, batch-fetch
+ * `marketLastRequestId` then `getRequest` to surface the IPFS reasoning CID directly on
+ * the card. Gated to the resolved ids passed in, so no extra reads happen for live markets.
+ * A flaky/empty read simply leaves the CID absent — the card falls back to the detail link.
+ *
+ * Read-only and additive: it does not touch the probability math or any existing read.
+ */
+export function useResolvedProofCids(resolvedIds: bigint[] | readonly bigint[]) {
+  const idList = useMemo(() => Array.from(resolvedIds), [resolvedIds]);
+
+  const requestIdContracts = useMemo(
+    () =>
+      idList.map((id) => ({
+        address: ADDRESSES.hook,
+        abi: PythiaHookAbi,
+        functionName: "marketLastRequestId" as const,
+        args: [id] as const
+      })),
+    [idList]
+  );
+
+  const requestIdQuery = useReadContracts({
+    contracts: requestIdContracts,
+    allowFailure: true,
+    query: { enabled: idList.length > 0 }
+  });
+
+  // Pair each market id with its request id (only those that resolved to a real request).
+  const requestPairs = useMemo(() => {
+    const data = requestIdQuery.data ?? [];
+    return idList
+      .map((id, i) => {
+        const res = data[i];
+        const requestId = res && res.status === "success" ? (res.result as bigint) : 0n;
+        return { id, requestId };
+      })
+      .filter((p) => p.requestId > 0n);
+  }, [idList, requestIdQuery.data]);
+
+  const requestContracts = useMemo(
+    () =>
+      requestPairs.map((p) => ({
+        address: ADDRESSES.provider,
+        abi: PythiaAIProviderAbi,
+        functionName: "getRequest" as const,
+        args: [p.requestId] as const
+      })),
+    [requestPairs]
+  );
+
+  const requestQuery = useReadContracts({
+    contracts: requestContracts,
+    allowFailure: true,
+    query: { enabled: requestPairs.length > 0 }
+  });
+
+  const cids = useMemo(() => {
+    const data = requestQuery.data ?? [];
+    const map = new Map<string, string>();
+    requestPairs.forEach((p, i) => {
+      const res = data[i];
+      if (res && res.status === "success") {
+        const view = res.result as unknown as { reasoningCid?: string } | undefined;
+        const cid = view?.reasoningCid;
+        if (cid && cid.length > 0) map.set(p.id.toString(), cid);
+      }
+    });
+    return map;
+  }, [requestPairs, requestQuery.data]);
+
+  return { cids };
 }
