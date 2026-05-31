@@ -7,12 +7,12 @@ import { useReadContract, useWatchContractEvent } from "wagmi";
 import ResolveButton from "@/components/ResolveButton";
 import { ShareButton, type Outcome } from "@/components/ShareButton";
 import TradePanel from "@/components/TradePanel";
-import { CopyChip, Icon, ProbBar, StatusTag, Tag } from "@/components/ui";
+import { AddressLink, Icon, ProbBar, StatusTag, Tag } from "@/components/ui";
 import { useMarketProbabilities } from "@/hooks/useMarkets";
 import { PythiaAIProviderAbi } from "@/lib/abi/PythiaAIProvider";
 import { PythiaHookAbi } from "@/lib/abi/PythiaHook";
 import { ADDRESSES } from "@/lib/contracts";
-import { formatExpiry, formatExpiryParts, truncateAddress } from "@/lib/format";
+import { formatExpiry, formatExpiryParts } from "@/lib/format";
 
 type MarketTuple = readonly [
   string,
@@ -163,7 +163,7 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
             <h1 style={{ margin: 0, fontSize: 26, lineHeight: 1.25, letterSpacing: "-0.01em" }}>{question}</h1>
             <div className="row gap-3" style={{ flexWrap: "wrap", marginTop: 14, color: "var(--text-secondary)", fontSize: 13 }}>
               <span><Icon name="clock" size={13} /> Expires {formatExpiry(expiry)} ({expiryParts.rel})</span>
-              <span>Creator <CopyChip value={creator} label={truncateAddress(creator)} /></span>
+              <span>Creator <AddressLink value={creator} kind="address" /></span>
             </div>
           </div>
         </section>
@@ -200,12 +200,12 @@ export default function MarketDetail({ marketId }: { marketId: bigint }) {
           <div className="three-col">
             <div className="stat">
               <div className="stat__label">YES token</div>
-              <div className="stat__value" style={{ fontSize: 13 }}><CopyChip value={yesToken} label={truncateAddress(yesToken)} /></div>
+              <div className="stat__value" style={{ fontSize: 13 }}><AddressLink value={yesToken} kind="token" /></div>
               <div className="stat__sub">{yesIsCurrency0 ? "currency0" : "currency1"}</div>
             </div>
             <div className="stat">
               <div className="stat__label">NO token</div>
-              <div className="stat__value" style={{ fontSize: 13 }}><CopyChip value={noToken} label={truncateAddress(noToken)} /></div>
+              <div className="stat__value" style={{ fontSize: 13 }}><AddressLink value={noToken} kind="token" /></div>
               <div className="stat__sub">{yesIsCurrency0 ? "currency1" : "currency0"}</div>
             </div>
             <div className="stat">

@@ -3,7 +3,7 @@
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { useState } from "react";
 
-import { statusLabel, truncateAddress } from "@/lib/format";
+import { explorerAddressUrl, explorerTokenUrl, statusLabel, truncateAddress } from "@/lib/format";
 
 type IconName =
   | "arrow"
@@ -140,6 +140,31 @@ export function CopyChip({ value, label }: { value: string; label?: string }) {
       <span>{label ?? truncateAddress(value)}</span>
       <Icon name={copied ? "check" : "copy"} size={12} />
     </button>
+  );
+}
+
+export function AddressLink({
+  value,
+  kind = "address",
+  label
+}: {
+  value: string;
+  kind?: "address" | "token";
+  label?: string;
+}) {
+  const href = kind === "token" ? explorerTokenUrl(value) : explorerAddressUrl(value);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="copy-chip"
+      title={value}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span>{label ?? truncateAddress(value)}</span>
+      <Icon name="external" size={12} />
+    </a>
   );
 }
 

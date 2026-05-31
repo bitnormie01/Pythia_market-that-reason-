@@ -1,4 +1,15 @@
+import { xLayer } from "./chain";
 import { MARKET_STATUS_LABEL } from "./contracts";
+
+const EXPLORER_BASE = xLayer.blockExplorers.default.url.replace(/\/+$/, "");
+
+export function explorerAddressUrl(addr: string): string {
+  return `${EXPLORER_BASE}/address/${addr}`;
+}
+
+export function explorerTokenUrl(addr: string): string {
+  return `${EXPLORER_BASE}/token/${addr}`;
+}
 
 export function statusLabel(status: number): string {
   return MARKET_STATUS_LABEL[status] ?? `UNKNOWN(${status})`;
