@@ -30,31 +30,6 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section style={{ marginBottom: 28 }}>
-          <div className="panel-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
-            <div className="stat-card">
-              <div className="stat__label">Solidity tests</div>
-              <div className="stat__value">96 / 96</div>
-              <div className="stat__sub">passing under forge</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat__label">Off-chain tests</div>
-              <div className="stat__value">30 / 30</div>
-              <div className="stat__sub">vitest, 7 files</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat__label">Resolution fee</div>
-              <div className="stat__value">0.005 OKB</div>
-              <div className="stat__sub">model #0 · DGrid Gemini</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat__label">Creator bond</div>
-              <div className="stat__value">5 USDT</div>
-              <div className="stat__sub">burned on INVALID</div>
-            </div>
-          </div>
-        </section>
-
         <section>
           <div className="page-head">
             <div>
